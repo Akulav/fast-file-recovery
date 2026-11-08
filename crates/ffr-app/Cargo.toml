@@ -1,0 +1,57 @@
+[package]
+name = "ffr-app"
+description = "Fast File Recovery: get deleted files back, fast"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+build = "build.rs"
+
+[[bin]]
+name = "fast-file-recovery"
+path = "src/main.rs"
+
+[dependencies]
+ffr-core = { path = "../ffr-core" }
+eframe = { version = "0.32", default-features = false, features = [
+    "wgpu",
+    "glow",
+    "default_fonts",
+    "wayland",
+    "x11",
+    "accesskit",
+] }
+# eframe's "wgpu" feature enables no GPU backend by itself; pick them here.
+wgpu = { version = "25", default-features = false, features = ["dx12", "vulkan", "metal", "wgsl"] }
+egui_extras = { version = "0.32", features = ["svg", "image"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "tiff", "webp"] }
+rfd = "0.15"
+ureq = "3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+sha2 = "0.10"
+semver = "1"
+anyhow = "1"
+crossbeam-channel = "0.5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+tracing-appender = "0.2"
+raw-window-handle = "0.6"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Console",
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[build-dependencies]
+embed-resource = "3"

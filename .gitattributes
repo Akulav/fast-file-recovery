@@ -1,0 +1,10 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+*.iss text eol=crlf
+*.isl text eol=crlf
+crates/ffr-core/tests/samples/** binary
+*.png binary
+*.ico binary
+*.icns binary
+*.bmp binary
+*.ttf binary

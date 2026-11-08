@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256">
+  <!-- Fast File Recovery master icon. The only hand-edited icon; `cargo xtask icons` renders the rest. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5B97FF"/>
+      <stop offset="1" stop-color="#7A54F5"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="arrow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5CF2CC"/>
+      <stop offset="1" stop-color="#2BC4A9"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="54" fill="url(#bg)"/>
+  <path d="M66 12h124a54 54 0 0 1 54 54v20C200 110 150 118 128 118S56 110 12 86V66a54 54 0 0 1 54-54z" fill="url(#shine)"/>
+  <!-- circular restore arrow around the file -->
+  <path d="M60.3 103.4 A72 72 0 1 1 72.8 174.3" fill="none" stroke="url(#arrow)" stroke-width="15" stroke-linecap="round"/>
+  <path d="M50.5 150.5 L73.5 192.5 L95.5 157.5 Z" fill="#41DDBA" stroke="#41DDBA" stroke-width="6" stroke-linejoin="round"/>
+  <!-- file -->
+  <path d="M106 92h32l22 22v46a8 8 0 0 1-8 8h-46a8 8 0 0 1-8-8V100a8 8 0 0 1 8-8z" fill="#FFFFFF"/>
+  <path d="M138 92v16a6 6 0 0 0 6 6h16z" fill="#C9D8FF"/>
+  <rect x="112" y="128" width="34" height="6" rx="3" fill="#7A8CFF"/>
+  <rect x="112" y="142" width="26" height="6" rx="3" fill="#A9B5FF"/>
+</svg>

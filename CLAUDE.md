@@ -440,29 +440,29 @@ Footer: **Made by Akulav**.
 Work through the milestones in order. Each milestone ends as a release (§10). Tick boxes here as work lands.
 
 **M0: Skeleton and pipeline (v0.1.x)**
-- [ ] Workspace, crates, `branding.rs`, `theme.rs` with both palettes and fonts, empty screens and sidebar flow
-- [ ] `assets/icon.svg` + `xtask icons`, Windows `.rc`/manifest, window icons on all OSes
-- [ ] `installer/ffr.iss` (install, update mode, uninstall prompt) + `xtask installer-images`
-- [ ] Linux/macOS self-install + `--here`/`--uninstall`/`--version`
-- [ ] Updater + Check for updates / Update buttons + About screen
-- [ ] `ci.yml`, `release.yml`, `run.bat`, `xtask bump|release|dist|check`, README skeleton, CHANGELOG
+- [x] Workspace, crates, `branding.rs`, `theme.rs` with both palettes and fonts, empty screens and sidebar flow
+- [x] `assets/icon.svg` + `xtask icons`, Windows `.rc`/manifest, window icons on all OSes
+- [x] `installer/ffr.iss` (install, update mode, uninstall prompt) + `xtask installer-images`
+- [x] Linux/macOS self-install + `--here`/`--uninstall`/`--version`
+- [x] Updater + Check for updates / Update buttons + About screen
+- [x] `ci.yml`, `release.yml`, `run.bat`, `xtask bump|release|dist|check`, README skeleton, CHANGELOG
 
 **M1: Devices and deep scan**
-- [ ] Device enumeration (3 OSes) + disk cards with partition bars + image files
-- [ ] Read-only `SourceHandle`, locking/unlocking, system-disk handling, elevation flow
-- [ ] Buffer pool, readers, Aho-Corasick match stage, bad-sector splitting
-- [ ] Signature registry + resolvers for Images and Documents, then the remaining categories
-- [ ] Scan screen: ring, sparkline, sector map, counters, pause/resume/stop
+- [x] Device enumeration (3 OSes) + disk cards with partition bars + image files
+- [x] Read-only `SourceHandle`, locking/unlocking, system-disk handling, elevation flow
+- [x] Buffer pool, readers, Aho-Corasick match stage, bad-sector splitting
+- [x] Signature registry + resolvers for Images and Documents, then the remaining categories
+- [x] Scan screen: ring, sparkline, sector map, counters, pause/resume/stop
 
 **M2: Results and recovery**
-- [ ] Virtualized results table, filter rail, search, sort, selection
-- [ ] Preview panel (thumbnails, text, metadata, hex)
-- [ ] Destination checks, writer, layouts, manifest, Recover screen
+- [x] Virtualized results table, filter rail, search, sort, selection
+- [x] Preview panel (thumbnails, text, metadata, hex)
+- [x] Destination checks, writer, layouts, manifest, Recover screen
 
 **M3: Quick scan and resilience**
-- [ ] MBR/GPT, NTFS MFT, FAT, exFAT quick scanners + merge with deep results
-- [ ] Session checkpoints, resume, save/load scan
-- [ ] Disk image creation + `.ffrmap`
+- [x] MBR/GPT, NTFS MFT, FAT, exFAT quick scanners + merge with deep results
+- [x] Session checkpoints, resume, save/load scan
+- [x] Disk image creation + `.ffrmap`
 
 **M4: Polish**
 - [ ] Performance pass against the §5.4 targets, benchmarks in CI

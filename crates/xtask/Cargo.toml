@@ -1,0 +1,14 @@
+[package]
+name = "xtask"
+description = "Build tasks for Fast File Recovery (cargo xtask …)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+resvg = "0.45"
+image = { version = "0.25", default-features = false, features = ["png", "bmp", "jpeg", "gif", "tiff", "webp"] }
+ico = "0.4"
+icns = "0.3"
