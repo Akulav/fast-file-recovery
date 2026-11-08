@@ -9,7 +9,7 @@ pub const REPO_API_LATEST: &str =
     "https://api.github.com/repos/Akulav/fast-file-recovery/releases/latest";
 pub const REPO_API_RELEASES: &str =
     "https://api.github.com/repos/Akulav/fast-file-recovery/releases?per_page=10";
-pub const LICENSE: &str = "MIT";
+pub const LICENSE: &str = "Akulav Source-Available License 1.0";
 /// Matches the `.desktop` file name so Wayland shows the icon.
 pub const APP_ID: &str = "fast-file-recovery";
 #[cfg_attr(windows, allow(dead_code))]

@@ -201,6 +201,15 @@ installer/        Inno Setup script and wizard images
 
 ## License
 
-[MIT](LICENSE). Fonts: Inter and JetBrains Mono (SIL OFL). UI icons follow Lucide (ISC).
+Fast File Recovery is **source-available**, not open source: you may use the releases, read the code and modify it privately,
+but not redistribute it or use it commercially. See [LICENSE](LICENSE). Third-party components (fonts: Inter and JetBrains Mono under the SIL OFL; UI icons following Lucide, ISC; Rust libraries) keep their own licenses.
 
-<div align="center"><b>Made by Akulav</b></div>
+---
+
+<div align="center">
+
+<img src="assets/icons/icon-256.png" width="40" alt="Fast File Recovery icon">
+
+**Made by [Akulav](https://github.com/Akulav)**
+
+</div>

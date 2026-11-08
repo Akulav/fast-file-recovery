@@ -4,6 +4,12 @@ All notable changes to Fast File Recovery are documented here. The format follow
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-08
+
+### Changed
+- The license is now the Akulav Source-Available License 1.0: use the releases, read and modify the code privately, but no redistribution or commercial use.
+- The README ends with the app icon and a "Made by Akulav" link.
+
 ## [0.1.0] - 2026-11-08
 
 ### Added

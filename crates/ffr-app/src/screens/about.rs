@@ -53,7 +53,7 @@ pub fn ui(app: &mut FfrApp, ui: &mut Ui) {
                     ui.label(RichText::new(format!("Version {VERSION}")).font(theme::mono(13.0)).color(p.muted));
                     ui.label(RichText::new(MADE_BY).font(theme::semibold(13.0)).color(p.accent));
                     ui.hyperlink_to(REPO_URL, REPO_URL);
-                    ui.label(widgets::small_muted(&p, format!("{LICENSE} licence · {}", branding::os_arch())));
+                    ui.label(widgets::small_muted(&p, format!("{LICENSE} · {}", branding::os_arch())));
                     if crate::elevate::is_elevated() {
                         ui.label(widgets::small_muted(&p, "Running with administrator rights"));
                     }
