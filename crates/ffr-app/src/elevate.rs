@@ -143,7 +143,8 @@ mod imp {
         // SAFETY: getuid has no preconditions.
         let uid = unsafe { libc::getuid() };
         let mut cmd = Command::new("pkexec");
-        cmd.arg("env");
+        // Absolute path: pkexec runs it as root, so it must not depend on the user's PATH.
+        cmd.arg("/usr/bin/env");
         for var in [
             "DISPLAY",
             "WAYLAND_DISPLAY",
@@ -168,9 +169,12 @@ mod imp {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         // SAFETY: getuid has no preconditions.
         let uid = unsafe { libc::getuid() };
-        let quoted = exe.to_string_lossy().replace('\'', "'\\''");
         let script = format!(
-            "do shell script \"FFR_ORIG_UID={uid} '{quoted}' --elevated --here > /dev/null 2>&1 &\" with administrator privileges"
+            "do shell script \"{}\" with administrator privileges",
+            applescript_escape(&format!(
+                "FFR_ORIG_UID={uid} {} --elevated --here > /dev/null 2>&1 &",
+                shell_quote(&exe.to_string_lossy())
+            ))
         );
         Command::new("/usr/bin/osascript")
             .arg("-e")
@@ -180,8 +184,31 @@ mod imp {
             .map_err(|e| e.to_string())
     }
 
+    /// Single-quote for `/bin/sh`.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(super) fn shell_quote(s: &str) -> String {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+
+    /// Escape for the inside of an AppleScript string literal.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(super) fn applescript_escape(s: &str) -> String {
+        s.replace('\\', "\\\\").replace('"', "\\\"")
+    }
+
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     pub fn relaunch_elevated() -> Result<(), String> {
         Err("Not supported on this system.".into())
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::imp::{applescript_escape, shell_quote};
+
+    #[test]
+    fn quoting() {
+        assert_eq!(shell_quote("/a b/it's"), "'/a b/it'\\''s'");
+        assert_eq!(applescript_escape(r#"a"b\c"#), r#"a\"b\\c"#);
     }
 }

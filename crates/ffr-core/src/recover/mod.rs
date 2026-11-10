@@ -109,6 +109,71 @@ pub fn same_disk(source: &DeviceInfo, dest_disks: &[DeviceId]) -> bool {
     dest_disks.contains(&source.id)
 }
 
+/// True when two paths name the same existing file or folder (after resolving links).
+pub fn same_path(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => {
+            if cfg!(windows) {
+                x.to_string_lossy().to_lowercase() == y.to_string_lossy().to_lowercase()
+            } else {
+                x == y
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Hard rule used right before writing: `Err` when recovered files must not go to `dest`.
+pub fn ensure_safe_destination(source: &DeviceInfo, dest: &Path) -> Result<(), String> {
+    let canon = std::fs::canonicalize(dest)
+        .map_err(|_| "The destination folder doesn't exist.".to_string())?;
+    if source.kind == DeviceKind::ImageFile {
+        if same_path(&canon, &source.path) {
+            return Err("The destination is the image file itself.".into());
+        }
+        return Ok(());
+    }
+    let disks = device::disks_of_path(&canon);
+    if disks.is_empty() {
+        return Err(
+            "Couldn't tell which disk this folder is on. Pick a folder on another disk.".into(),
+        );
+    }
+    if same_disk(source, &disks) {
+        return Err(
+            "The destination is on the disk you are recovering from. Pick a different disk.".into(),
+        );
+    }
+    Ok(())
+}
+
+/// Make sure `src` is still the disk the scan was made from. Disk numbers can change after a
+/// reboot or re-plug, and reading (or worse, writing next to) the wrong disk must never happen.
+pub fn verify_source(
+    dev: &DeviceInfo,
+    fingerprint: &str,
+    src: &dyn BlockRead,
+) -> Result<(), String> {
+    const CHANGED: &str = "The disk this scan was made from is not connected, or it changed. \
+         Connect it and scan again.";
+    if !fingerprint.is_empty() {
+        return if device::fingerprint(dev, src) == fingerprint {
+            Ok(())
+        } else {
+            Err(CHANGED.into())
+        };
+    }
+    // Older saved scans have no fingerprint: match the disk's identity instead.
+    if dev.kind == DeviceKind::ImageFile {
+        return Ok(());
+    }
+    let now = device::list_devices();
+    match now.iter().find(|d| d.id == dev.id) {
+        Some(d) if d.model == dev.model && d.serial == dev.serial && d.size == dev.size => Ok(()),
+        _ => Err(CHANGED.into()),
+    }
+}
+
 /// Check a destination folder. `needed` is the total size of the selection.
 pub fn check_destination(source: &DeviceInfo, dest: &Path, needed: u64) -> DestCheck {
     let mut c = DestCheck::default();
@@ -122,7 +187,7 @@ pub fn check_destination(source: &DeviceInfo, dest: &Path, needed: u64) -> DestC
         }
     };
     if source.kind == DeviceKind::ImageFile {
-        let ok = canon != source.path;
+        let ok = !same_path(&canon, &source.path);
         push(
             ok,
             true,
@@ -166,7 +231,7 @@ pub fn check_destination(source: &DeviceInfo, dest: &Path, needed: u64) -> DestC
             "Can't write to this folder".into()
         },
     );
-    let want = needed + needed / 100;
+    let want = needed.saturating_add(needed / 100);
     match device::free_space(&canon) {
         Some(free) if free >= want => push(
             true,

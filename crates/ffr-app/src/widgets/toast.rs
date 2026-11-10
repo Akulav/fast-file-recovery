@@ -79,34 +79,77 @@ impl Toasts {
                 .interactable(true);
             let r = area.show(ctx, |ui| {
                 ui.set_opacity(alpha);
-                Frame::new()
+                // Slide up slightly while fading in.
+                let lift = (1.0 - fade_in) * 8.0;
+                if lift > 0.0 {
+                    ui.add_space(lift);
+                }
+                let fr = Frame::new()
                     .fill(p.raised)
-                    .stroke(Stroke::new(1.0_f32, Palette::soft(color, 140)))
+                    .stroke(Stroke::new(1.0_f32, p.border))
                     .corner_radius(CornerRadius::same(theme::CARD_RADIUS))
-                    .inner_margin(Margin::symmetric(14, 10))
-                    .shadow(egui::epaint::Shadow {
-                        offset: [0, 4],
-                        blur: 18,
-                        spread: 0,
-                        color: p.shadow,
+                    .inner_margin(Margin {
+                        left: 18,
+                        right: 12,
+                        top: 11,
+                        bottom: 11,
                     })
+                    .shadow(p.soft_shadow())
                     .show(ui, |ui| {
                         ui.set_max_width(360.0);
                         ui.horizontal(|ui| {
-                            icons::icon(ui, icon, 16.0, color);
+                            let (ir, _) = ui
+                                .allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
+                            ui.painter()
+                                .circle_filled(ir.center(), 12.0, Palette::soft(color, 38));
+                            icons::paint(ui, ir.shrink(5.0), icon, color);
                             ui.add(egui::Label::new(RichText::new(&t.text).color(p.text)).wrap());
-                            if t.kind == Kind::Error
-                                && ui
-                                    .add(
-                                        egui::Button::new(RichText::new("✕").color(p.muted))
-                                            .frame(false),
-                                    )
+                            if t.kind == Kind::Error {
+                                let (cr, cresp) = ui.allocate_exact_size(
+                                    egui::vec2(20.0, 20.0),
+                                    egui::Sense::click(),
+                                );
+                                let h = ui.ctx().animate_bool_with_time(
+                                    cresp.id,
+                                    cresp.hovered(),
+                                    theme::ANIM,
+                                );
+                                ui.painter().rect_filled(
+                                    cr,
+                                    CornerRadius::same(theme::CONTROL_RADIUS),
+                                    Palette::soft(p.muted, (40.0 * h) as u8),
+                                );
+                                icons::paint(
+                                    ui,
+                                    cr.shrink(4.0),
+                                    Icon::X,
+                                    Palette::mix(p.muted, p.text, h),
+                                );
+                                if cresp
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .on_hover_text("Dismiss")
                                     .clicked()
-                            {
-                                close = Some(t.id);
+                                {
+                                    close = Some(t.id);
+                                }
                             }
                         });
                     });
+                // Coloured stripe on the leading edge.
+                let rect = fr.response.rect;
+                ui.painter().rect_filled(
+                    egui::Rect::from_min_max(
+                        rect.min,
+                        egui::pos2(rect.left() + 3.0, rect.bottom()),
+                    ),
+                    CornerRadius {
+                        nw: theme::CARD_RADIUS,
+                        sw: theme::CARD_RADIUS,
+                        ne: 0,
+                        se: 0,
+                    },
+                    color,
+                );
             });
             y -= r.response.rect.height() + 8.0;
             if fade_in < 1.0 || (t.kind != Kind::Error && fade_out < 1.0) {

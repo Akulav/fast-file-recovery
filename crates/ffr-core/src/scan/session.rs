@@ -8,6 +8,8 @@ use std::path::Path;
 
 const MAGIC: [u8; 8] = *b"FFRSCAN\0";
 const VERSION: u32 = 1;
+/// 5 million hits with extras stay well below this.
+const MAX_UNPACKED: u64 = 4 << 30;
 
 #[derive(Serialize, Deserialize)]
 struct SessionFile {
@@ -45,9 +47,16 @@ pub fn load_session(path: &Path) -> Result<Session> {
     }
     let mut dec = ruzstd::decoding::StreamingDecoder::new(&data[8..])
         .map_err(|e| CoreError::Session(e.to_string()))?;
+    // Cap the unpacked size so a damaged or hostile file can't exhaust memory.
     let mut raw = Vec::new();
-    std::io::Read::read_to_end(&mut dec, &mut raw)
-        .map_err(|e| CoreError::Session(e.to_string()))?;
+    std::io::Read::read_to_end(
+        &mut std::io::Read::take(&mut dec, MAX_UNPACKED + 1),
+        &mut raw,
+    )
+    .map_err(|e| CoreError::Session(e.to_string()))?;
+    if raw.len() as u64 > MAX_UNPACKED {
+        return Err(CoreError::Session("the scan file is too large".into()));
+    }
     let file: SessionFile =
         postcard::from_bytes(&raw).map_err(|e| CoreError::Session(e.to_string()))?;
     if file.version > VERSION {

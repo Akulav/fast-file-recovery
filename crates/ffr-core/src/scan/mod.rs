@@ -190,6 +190,9 @@ pub struct Summary {
 pub enum ScanEvent {
     Phase(Phase),
     Locked(String),
+    /// Identity of the source (model + serial + size + first-MiB hash), sent once at the start
+    /// so the GUI's copy of the session can be checked before recovery.
+    Fingerprint(String),
     Progress {
         bytes_done: u64,
         bytes_total: u64,

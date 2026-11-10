@@ -110,6 +110,7 @@ pub fn start_recovery(
     let handle = JobHandle::default();
     let (tx, rx) = unbounded();
     let device = session.source.device.clone();
+    let fingerprint = session.fingerprint.clone();
     let jobs = plan(session, &selection, opts.layout);
     let h = handle.clone();
     let spawned = std::thread::Builder::new()
@@ -117,7 +118,7 @@ pub fn start_recovery(
         .spawn(move || {
             let tx2 = tx.clone();
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run(device, jobs, opts, &h, &tx2)
+                run(device, &fingerprint, jobs, opts, &h, &tx2)
             }));
             match r {
                 Ok(Ok(s)) => {
@@ -141,19 +142,20 @@ pub fn start_recovery(
 
 fn run(
     dev: device::DeviceInfo,
+    fingerprint: &str,
     jobs: Vec<Job>,
     opts: RecoverOptions,
     h: &JobHandle,
     tx: &Sender<RecoverEvent>,
 ) -> Result<RecoverSummary, String> {
     let t0 = Instant::now();
+    // Checked again here, right before writing: the screen's check may be stale.
+    super::ensure_safe_destination(&dev, &opts.dest)?;
     let src = device::open_reader(&dev).map_err(|e| e.to_string())?;
+    super::verify_source(&dev, fingerprint, &src)?;
     let (y, mo, d, hh, mi, ss) = crate::util::now_utc();
-    let folder = opts
-        .dest
-        .join(format!("FFR_{y:04}{mo:02}{d:02}_{hh:02}{mi:02}{ss:02}"));
-    std::fs::create_dir_all(&folder)
-        .map_err(|e| format!("Couldn't create the output folder: {e}"))?;
+    let base = format!("FFR_{y:04}{mo:02}{d:02}_{hh:02}{mi:02}{ss:02}");
+    let folder = new_run_folder(&opts.dest, &base)?;
     let files_total = jobs.len() as u64;
     let bytes_total: u64 = jobs.iter().map(|j| j.hit.len).sum();
     let next = AtomicUsize::new(0);
@@ -275,7 +277,12 @@ fn write_one(
             return row;
         }
     }
-    let file = match std::fs::File::create(&path) {
+    // `create_new` never overwrites or follows an existing file or link.
+    let file = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
         Ok(f) => f,
         Err(e) => {
             row.status = format!("failed: {e}");
@@ -361,11 +368,37 @@ fn write_one(
     row
 }
 
+/// Create a fresh run folder; a second run in the same second gets `_2`, `_3`, …
+fn new_run_folder(dest: &Path, base: &str) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(dest).map_err(|e| format!("Couldn't create the output folder: {e}"))?;
+    for n in 1..1000 {
+        let name = if n == 1 {
+            base.to_string()
+        } else {
+            format!("{base}_{n}")
+        };
+        let p = dest.join(name);
+        match std::fs::create_dir(&p) {
+            Ok(()) => return Ok(p),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("Couldn't create the output folder: {e}")),
+        }
+    }
+    Err("Couldn't create the output folder: too many runs in one second.".into())
+}
+
+/// Quote a CSV field. Names come from the disk, so a leading `=`, `+`, `-`, `@` (formula
+/// injection in spreadsheet apps) is neutralised with a `'` prefix.
 fn csv_field(s: &str) -> String {
+    let s = if s.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        format!("'{s}")
+    } else {
+        s.to_string()
+    };
     if s.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
-        s.to_string()
+        s
     }
 }
 
@@ -391,4 +424,26 @@ fn write_csv(path: &Path, rows: &[Row]) -> std::io::Result<()> {
         )?;
     }
     w.flush()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn csv_fields_are_quoted_and_defused() {
+        assert_eq!(csv_field("a.jpg"), "a.jpg");
+        assert_eq!(csv_field("a,b"), "\"a,b\"");
+        assert_eq!(csv_field("=HYPERLINK(1)"), "'=HYPERLINK(1)");
+        assert_eq!(csv_field("@x,y"), "\"'@x,y\"");
+    }
+
+    #[test]
+    fn run_folders_are_unique() {
+        let dir = std::env::temp_dir().join(format!("ffr-runs-{}", std::process::id()));
+        let a = new_run_folder(&dir, "FFR_x").unwrap();
+        let b = new_run_folder(&dir, "FFR_x").unwrap();
+        assert_ne!(a, b);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

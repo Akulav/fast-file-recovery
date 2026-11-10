@@ -92,7 +92,8 @@ fn run(
     let canon_dir = std::fs::canonicalize(&dest_dir)
         .map_err(|_| "The destination folder doesn't exist.".to_string())?;
     if dev.kind == DeviceKind::ImageFile {
-        if canon_dir.join(dest.file_name().unwrap_or_default()) == dev.path {
+        let target = canon_dir.join(dest.file_name().unwrap_or_default());
+        if crate::recover::same_path(&target, &dev.path) {
             return Err("The image can't overwrite its own source.".into());
         }
     } else {

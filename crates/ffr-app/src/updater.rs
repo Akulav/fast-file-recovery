@@ -87,6 +87,15 @@ fn current() -> Version {
     Version::parse(VERSION).unwrap_or_else(|_| Version::new(0, 0, 0))
 }
 
+/// Release downloads must come from GitHub over HTTPS.
+fn trusted_url(url: &str) -> bool {
+    url.starts_with("https://github.com/")
+        || url.starts_with("https://objects.githubusercontent.com/")
+}
+
+/// No release binary is anywhere near this; refuse anything bigger.
+const MAX_ASSET: u64 = 512 << 20;
+
 fn to_release(r: GhRelease) -> Option<Release> {
     let v = Version::parse(r.tag_name.trim_start_matches('v')).ok()?;
     let asset = r
@@ -94,6 +103,9 @@ fn to_release(r: GhRelease) -> Option<Release> {
         .iter()
         .find(|a| a.name == branding::this_os_asset())?;
     let sums = r.assets.iter().find(|a| a.name == ASSET_SUMS)?;
+    if !trusted_url(&asset.browser_download_url) || !trusted_url(&sums.browser_download_url) {
+        return None;
+    }
     Some(Release {
         version: v,
         notes: r.body.unwrap_or_default(),
@@ -141,9 +153,37 @@ pub fn find_sum(sums: &str, name: &str) -> Option<String> {
     })
 }
 
+/// A fresh folder only this user can use. A fixed name in a shared temp folder would let
+/// another local user plant or swap the file between the checksum check and the install.
+fn private_dir(version: &Version) -> Result<PathBuf, String> {
+    let base = std::env::temp_dir();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    for n in 0..100u32 {
+        let dir = base.join(format!(
+            "ffr-update-{version}-{}-{nanos:x}-{n}",
+            std::process::id()
+        ));
+        #[cfg_attr(not(unix), allow(unused_mut))]
+        let mut b = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
+        match b.create(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("Couldn't create a download folder: {e}")),
+        }
+    }
+    Err("Couldn't create a download folder.".into())
+}
+
 fn download(rel: &Release, tx: &Sender<Msg>) -> Result<PathBuf, String> {
-    let dir = std::env::temp_dir().join(format!("ffr-update-{}", rel.version));
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    if !trusted_url(&rel.asset_url) || !trusted_url(&rel.sums_url) {
+        return Err("The update link does not point to GitHub, so it was not used.".into());
+    }
+    let dir = private_dir(&rel.version)?;
     let path = dir.join(branding::this_os_asset());
     let resp = get(&rel.asset_url)?;
     let total = resp
@@ -153,7 +193,14 @@ fn download(rel: &Release, tx: &Sender<Msg>) -> Result<PathBuf, String> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(rel.asset_size);
     let mut reader = resp.into_body().into_reader();
-    let mut file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+    if total > MAX_ASSET {
+        return Err("The update is unexpectedly large, so it was not downloaded.".into());
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; 256 * 1024];
     let mut done = 0u64;
@@ -165,9 +212,14 @@ fn download(rel: &Release, tx: &Sender<Msg>) -> Result<PathBuf, String> {
         if n == 0 {
             break;
         }
+        done += n as u64;
+        if done > MAX_ASSET {
+            drop(file);
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err("The update is unexpectedly large, so it was deleted.".into());
+        }
         hasher.update(&buf[..n]);
         file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
-        done += n as u64;
         if last.elapsed() > Duration::from_millis(100) {
             last = Instant::now();
             let _ = tx.send(Msg::Progress(done, total));
@@ -189,7 +241,7 @@ fn download(rel: &Release, tx: &Sender<Msg>) -> Result<PathBuf, String> {
         .map(|b| format!("{b:02x}"))
         .collect();
     if got != want {
-        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir_all(&dir);
         return Err(
             "The download did not match its SHA-256 checksum, so it was deleted. Try again later."
                 .into(),
@@ -348,5 +400,15 @@ mod tests {
             Some("b".repeat(64))
         );
         assert_eq!(find_sum(&s, "nope"), None);
+    }
+
+    #[test]
+    fn only_github_https_urls() {
+        assert!(trusted_url(
+            "https://github.com/Akulav/fast-file-recovery/releases/download/v1/x"
+        ));
+        assert!(!trusted_url("http://github.com/x"));
+        assert!(!trusted_url("https://github.com.evil.example/x"));
+        assert!(!trusted_url("https://example.com/x"));
     }
 }

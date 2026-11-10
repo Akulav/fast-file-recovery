@@ -47,17 +47,26 @@ pub fn disk_card(
         .ctx()
         .animate_bool_with_time(resp.id.with("sel"), selected, theme::ANIM);
     let fill = Palette::mix(p.surface, p.raised, h.max(s));
-    let stroke = Palette::mix(Palette::mix(p.border, p.muted, h * 0.5), p.accent, s);
+    let stroke = Palette::mix(Palette::mix(p.border, p.muted, h * 0.4), p.accent, s);
+    let radius = CornerRadius::same(theme::CARD_RADIUS);
+    // Resting shadow that deepens on hover, so the card lifts under the pointer.
+    let mut sh = p.soft_shadow();
+    sh.color = Palette::soft(
+        sh.color,
+        (sh.color.a() as f32 * (0.35 + 0.65 * h.max(s))) as u8,
+    );
+    sh.blur = (8.0 + 14.0 * h.max(s)) as u8;
+    ui.painter().add(sh.as_shape(rect, radius));
     if s > 0.0 {
         ui.painter().rect_filled(
             rect.expand(3.0 * s),
             CornerRadius::same(theme::CARD_RADIUS + 3),
-            Palette::soft(p.accent, (40.0 * s) as u8),
+            Palette::soft(p.accent, (34.0 * s) as u8),
         );
     }
     ui.painter().rect(
         rect,
-        CornerRadius::same(theme::CARD_RADIUS),
+        radius,
         fill,
         Stroke::new(if selected { 1.5_f32 } else { 1.0_f32 }, stroke),
         egui::StrokeKind::Inside,
@@ -75,8 +84,20 @@ pub fn disk_card(
         Icon::for_bus(dev.bus, dev.kind == DeviceKind::ImageFile),
         p.accent,
     );
+    // Selected: a check badge in the top-right corner.
+    if s > 0.0 {
+        let c = egui::pos2(rect.right() - pad - 9.0, rect.top() + pad + 9.0);
+        ui.painter()
+            .circle_filled(c, 10.0 * s, Palette::mix(p.surface, p.accent, s));
+        icons::paint(
+            ui,
+            Rect::from_center_size(c, Vec2::splat(12.0 * s)),
+            Icon::Check,
+            p.on_accent,
+        );
+    }
     let tx = icon_rect.right() + 12.0;
-    let max_w = rect.right() - tx - pad;
+    let max_w = rect.right() - tx - pad - 26.0;
     let title = ui
         .painter()
         .layout(dev.model.clone(), theme::semibold(14.0), p.text, max_w);

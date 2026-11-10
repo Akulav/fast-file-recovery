@@ -16,23 +16,31 @@ use eframe::egui::{
 };
 use icons::Icon;
 
-/// A surface card.
+/// A surface card with a hairline border and a barely-there resting shadow.
 pub fn card(p: &Palette) -> Frame {
     Frame::new()
         .fill(p.surface)
         .stroke(Stroke::new(1.0_f32, p.border))
         .corner_radius(CornerRadius::same(CARD_RADIUS))
-        .inner_margin(Margin::same(16))
+        .inner_margin(Margin::same(18))
+        .shadow(p.rest_shadow())
 }
 
 /// A raised card with a soft shadow.
 pub fn raised_card(p: &Palette) -> Frame {
-    card(p).fill(p.raised).shadow(egui::epaint::Shadow {
-        offset: [0, 4],
-        blur: 16,
-        spread: 0,
-        color: p.shadow,
-    })
+    card(p).fill(p.raised).shadow(p.soft_shadow())
+}
+
+/// Keyboard focus ring around a custom-drawn control.
+pub fn focus_ring(ui: &Ui, p: &Palette, resp: &Response, radius: u8) {
+    if resp.has_focus() {
+        ui.painter().rect_stroke(
+            resp.rect.expand(2.5),
+            CornerRadius::same(radius + 2),
+            Stroke::new(2.0_f32, p.focus()),
+            egui::StrokeKind::Outside,
+        );
+    }
 }
 
 fn button_inner(
@@ -47,13 +55,14 @@ fn button_inner(
     let font = theme::semibold(13.0);
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, p.text);
     let icon_w = if icon.is_some() { 16.0 + 6.0 } else { 0.0 };
-    let size = Vec2::new(galley.size().x + icon_w + 28.0, 32.0);
+    let size = Vec2::new(galley.size().x + icon_w + 30.0, 34.0);
     let sense = if enabled {
         Sense::click()
     } else {
         Sense::hover()
     };
     let (rect, resp) = ui.allocate_exact_size(size, sense);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, text));
     if ui.is_rect_visible(rect) {
         let t = ui
             .ctx()
@@ -84,14 +93,35 @@ fn button_inner(
             fill = Palette::mix(fill, p.bg, 0.15);
         }
         let painter = ui.painter();
+        let radius = CornerRadius::same(CONTROL_RADIUS);
+        if primary && enabled {
+            // Soft coloured glow that grows on hover.
+            painter.add(
+                egui::epaint::Shadow {
+                    offset: [0, 2],
+                    blur: (6.0 + 8.0 * t) as u8,
+                    spread: 0,
+                    color: Palette::soft(base, (40.0 + 50.0 * t) as u8),
+                }
+                .as_shape(rect, radius),
+            );
+        }
         painter.rect(
             rect,
-            CornerRadius::same(CONTROL_RADIUS),
+            radius,
             fill,
             Stroke::new(1.0_f32, stroke),
             egui::StrokeKind::Inside,
         );
-        let mut x = rect.left() + 14.0;
+        if primary && enabled {
+            // Thin top highlight gives the fill a little depth.
+            let top = egui::Rect::from_min_max(
+                rect.min + Vec2::new(2.0, 1.0),
+                egui::pos2(rect.right() - 2.0, rect.top() + 1.5),
+            );
+            painter.rect_filled(top, 0, Palette::soft(Palette::white(), 46));
+        }
+        let mut x = rect.left() + 15.0;
         if let Some(ic) = icon {
             let r = egui::Rect::from_center_size(
                 egui::pos2(x + 8.0, rect.center().y),
@@ -105,6 +135,7 @@ fn button_inner(
             .layout_no_wrap(text.to_string(), theme::semibold(13.0), fg);
         let pos = egui::pos2(x, rect.center().y - galley.size().y / 2.0);
         ui.painter().galley(pos, galley, fg);
+        focus_ring(ui, p, &resp, CONTROL_RADIUS);
     }
     if enabled {
         resp.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -168,18 +199,40 @@ pub fn mono(p: &Palette, text: impl Into<String>) -> RichText {
 
 /// A coloured banner (warning / error / info) with an icon.
 pub fn banner(ui: &mut Ui, p: &Palette, color: Color32, icon: Icon, text: &str) {
-    Frame::new()
-        .fill(Palette::soft(color, 28))
-        .stroke(Stroke::new(1.0_f32, Palette::soft(color, 110)))
-        .corner_radius(CornerRadius::same(CONTROL_RADIUS))
-        .inner_margin(Margin::symmetric(12, 10))
+    let r = Frame::new()
+        .fill(Palette::soft(color, 22))
+        .stroke(Stroke::new(1.0_f32, Palette::soft(color, 80)))
+        .corner_radius(CornerRadius::same(CONTROL_RADIUS + 2))
+        .inner_margin(Margin {
+            left: 16,
+            right: 12,
+            top: 10,
+            bottom: 10,
+        })
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 icons::icon(ui, icon, 16.0, color);
+                ui.add_space(2.0);
                 ui.add(egui::Label::new(RichText::new(text).color(p.text)).wrap());
             });
         });
+    // Accent stripe on the leading edge.
+    let rect = r.response.rect;
+    let stripe = egui::Rect::from_min_max(
+        rect.min + Vec2::new(0.0, 0.0),
+        egui::pos2(rect.left() + 3.0, rect.bottom()),
+    );
+    ui.painter().rect_filled(
+        stripe,
+        CornerRadius {
+            nw: CONTROL_RADIUS + 2,
+            sw: CONTROL_RADIUS + 2,
+            ne: 0,
+            se: 0,
+        },
+        color,
+    );
 }
 
 /// A segmented control. Returns true when the value changed.
@@ -191,7 +244,7 @@ pub fn segmented<T: PartialEq + Copy>(
 ) -> bool {
     let mut changed = false;
     Frame::new()
-        .fill(p.bg)
+        .fill(p.inset())
         .stroke(Stroke::new(1.0_f32, p.border))
         .corner_radius(CornerRadius::same(CONTROL_RADIUS + 2))
         .inner_margin(Margin::same(3))
@@ -215,10 +268,22 @@ pub fn segmented<T: PartialEq + Copy>(
                         resp.hovered(),
                         theme::ANIM,
                     );
-                    let fill = Palette::mix(Palette::mix(p.bg, p.raised, h), p.accent, t);
-                    ui.painter()
-                        .rect_filled(rect, CornerRadius::same(CONTROL_RADIUS), fill);
-                    let fg = Palette::mix(p.muted, p.on_accent, t);
+                    let r = CornerRadius::same(CONTROL_RADIUS);
+                    if t > 0.0 {
+                        ui.painter().add(
+                            egui::epaint::Shadow {
+                                offset: [0, 1],
+                                blur: 6,
+                                spread: 0,
+                                color: Palette::soft(p.accent, (70.0 * t) as u8),
+                            }
+                            .as_shape(rect, r),
+                        );
+                    }
+                    let idle = Palette::mix(p.inset(), p.raised, h);
+                    let fill = Palette::mix(idle, p.accent, t);
+                    ui.painter().rect_filled(rect, r, fill);
+                    let fg = Palette::mix(Palette::mix(p.muted, p.text, h), p.on_accent, t);
                     ui.painter().text(
                         rect.center(),
                         egui::Align2::CENTER_CENTER,
@@ -248,13 +313,24 @@ pub fn toggle(ui: &mut Ui, p: &Palette, on: &mut bool) -> Response {
         *on = !*on;
         resp.mark_changed();
     }
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, *on, ""));
     let t = ui.ctx().animate_bool_with_time(resp.id, *on, theme::ANIM);
-    let track = Palette::mix(p.border, p.accent, t);
+    let h = ui
+        .ctx()
+        .animate_bool_with_time(resp.id.with("h"), resp.hovered(), theme::ANIM);
+    let off_track = Palette::mix(p.border, p.muted, 0.25 * h);
+    let track = Palette::mix(off_track, p.accent, t);
     ui.painter()
         .rect_filled(rect, CornerRadius::same(10), track);
     let x = egui::lerp(rect.left() + 10.0..=rect.right() - 10.0, t);
-    ui.painter()
-        .circle_filled(egui::pos2(x, rect.center().y), 7.0, Palette::white());
+    let knob = egui::pos2(x, rect.center().y);
+    ui.painter().circle_filled(
+        knob + Vec2::new(0.0, 1.0),
+        7.5,
+        Palette::soft(Color32::BLACK, 40),
+    );
+    ui.painter().circle_filled(knob, 7.0, Palette::white());
+    focus_ring(ui, p, &resp, 10);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -262,6 +338,7 @@ pub fn toggle(ui: &mut Ui, p: &Palette, on: &mut bool) -> Response {
 pub fn top_bar(ui: &mut Ui, p: &Palette, title: &str, context: &str, right: impl FnOnce(&mut Ui)) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
             ui.label(
                 RichText::new(title)
                     .font(theme::semibold(22.0))
@@ -271,7 +348,11 @@ pub fn top_bar(ui: &mut Ui, p: &Palette, title: &str, context: &str, right: impl
         });
         ui.with_layout(Layout::right_to_left(Align::Center), right);
     });
-    ui.add_space(theme::SPACE);
+    ui.add_space(theme::SPACE * 1.5);
+    let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
+    ui.painter()
+        .hline(r.x_range(), r.center().y, Stroke::new(1.0_f32, p.divider()));
+    ui.add_space(theme::SPACE * 2.0);
 }
 
 /// Smoothly approach a target value (for progress numbers).

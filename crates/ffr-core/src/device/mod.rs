@@ -221,16 +221,23 @@ pub fn total_ram() -> Option<u64> {
 }
 
 /// Give a folder tree to a user (used when running elevated on Linux/macOS).
+///
+/// Runs as root, so it never follows symbolic links: a link planted in the tree (or the tree
+/// root swapped for a link) must not hand some other file to the user.
 pub fn chown_tree(root: &Path, uid: u32, gid: u32) {
+    let Ok(meta) = std::fs::symlink_metadata(root) else {
+        return;
+    };
+    if meta.file_type().is_symlink() {
+        return;
+    }
     Os::chown(root, uid, gid);
+    if !meta.is_dir() {
+        return;
+    }
     if let Ok(rd) = std::fs::read_dir(root) {
         for e in rd.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                chown_tree(&p, uid, gid);
-            } else {
-                Os::chown(&p, uid, gid);
-            }
+            chown_tree(&e.path(), uid, gid);
         }
     }
 }

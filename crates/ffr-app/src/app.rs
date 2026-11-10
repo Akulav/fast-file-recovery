@@ -40,7 +40,12 @@ pub enum Dialog {
     LockFailed(Vec<String>),
     ConfirmUnmount(Vec<String>),
     Install(StartupOffer),
-    Resume(Box<Session>),
+    /// A resumable checkpoint was found; keeps the lock choices made before it.
+    Resume {
+        session: Box<Session>,
+        unlocked: bool,
+        unmount: bool,
+    },
     Imaging,
 }
 
@@ -355,6 +360,7 @@ pub struct FfrApp {
     pub is_admin: bool,
     pending_start: Option<(Receiver<Option<Session>>, bool, bool)>,
     session_io: Option<Receiver<Result<Session, String>>>,
+    save_io: Option<Receiver<Result<(), String>>>,
     last_frame: Instant,
     geom_changed: Option<Instant>,
     pub category_totals: [(u64, u64); 6],
@@ -391,6 +397,7 @@ impl FfrApp {
             is_admin: crate::elevate::is_elevated(),
             pending_start: None,
             session_io: None,
+            save_io: None,
             last_frame: Instant::now(),
             geom_changed: None,
             category_totals: [(0, 0); 6],
@@ -575,6 +582,11 @@ impl FfrApp {
             match e {
                 ScanEvent::Phase(p) => scan.phase = p,
                 ScanEvent::Locked(d) => scan.lock_desc = Some(d),
+                ScanEvent::Fingerprint(f) => {
+                    if let Some(s) = &mut self.session {
+                        s.fingerprint = f;
+                    }
+                }
                 ScanEvent::Progress {
                     bytes_done,
                     bytes_total,
@@ -697,22 +709,40 @@ impl FfrApp {
         else {
             return;
         };
+        let (tx, rx) = unbounded();
+        self.save_io = Some(rx);
         std::thread::spawn(move || {
-            if let Err(e) = ffr_core::scan::save_session(&path, &s) {
+            let r = ffr_core::scan::save_session(&path, &s).map_err(|e| {
                 tracing::warn!("save failed: {e}");
-            }
+                format!("Couldn't save the scan: {e}")
+            });
             crate::elevate::give_to_original_user(&path);
+            let _ = tx.send(r);
         });
-        self.toasts.success("Scan saved.");
     }
 
     fn poll_sessions(&mut self) {
+        if let Some(rx) = &self.save_io {
+            if let Ok(r) = rx.try_recv() {
+                self.save_io = None;
+                match r {
+                    Ok(()) => self.toasts.success("Scan saved."),
+                    Err(e) => self.toasts.error(e),
+                }
+            }
+        }
         if let Some((rx, unlocked, unmount)) = &self.pending_start {
             if let Ok(found) = rx.try_recv() {
                 let (unlocked, unmount) = (*unlocked, *unmount);
                 self.pending_start = None;
                 match found {
-                    Some(s) => self.dialog = Some(Dialog::Resume(Box::new(s))),
+                    Some(s) => {
+                        self.dialog = Some(Dialog::Resume {
+                            session: Box::new(s),
+                            unlocked,
+                            unmount,
+                        })
+                    }
                     None => self.start_scan_now(None, unlocked, unmount),
                 }
             }
@@ -936,7 +966,11 @@ impl FfrApp {
                         );
                     });
                 });
-                ui.add_space(18.0);
+                ui.add_space(16.0);
+                sidebar_divider(ui, &p);
+                ui.add_space(12.0);
+                sidebar_label(ui, &p, "RECOVERY");
+                ui.add_space(4.0);
                 let has_scan = self.scan.is_some() || self.session.is_some();
                 let has_hits = self.session.as_ref().is_some_and(|s| !s.hits.is_empty());
                 let steps = [
@@ -980,18 +1014,26 @@ impl FfrApp {
                             Vec2::new(ui.available_width(), 8.0),
                             Sense::hover(),
                         );
+                        // The connector turns green once the step above it is done.
+                        let line = if done {
+                            Palette::soft(p.success, 150)
+                        } else {
+                            p.border
+                        };
                         ui.painter().line_segment(
                             [
-                                egui::pos2(r.left() + 19.0, r.top()),
-                                egui::pos2(r.left() + 19.0, r.bottom()),
+                                egui::pos2(r.left() + 19.0, r.top() - 1.0),
+                                egui::pos2(r.left() + 19.0, r.bottom() + 1.0),
                             ],
-                            Stroke::new(1.5_f32, p.border),
+                            Stroke::new(2.0_f32, line),
                         );
                     }
                 }
-                ui.add_space(18.0);
-                ui.separator();
-                ui.add_space(6.0);
+                ui.add_space(16.0);
+                sidebar_divider(ui, &p);
+                ui.add_space(12.0);
+                sidebar_label(ui, &p, "APP");
+                ui.add_space(4.0);
                 if self.nav_item(
                     ui,
                     Screen::Settings,
@@ -1007,7 +1049,18 @@ impl FfrApp {
                     self.screen = Screen::About;
                 }
                 ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-                    ui.label(widgets::small_muted(&p, format!("{MADE_BY} · v{VERSION}")));
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        ui.label(widgets::small_muted(&p, MADE_BY));
+                        ui.label(
+                            RichText::new(format!("v{VERSION}"))
+                                .font(theme::mono(11.0))
+                                .color(p.muted),
+                        );
+                    });
+                    ui.add_space(6.0);
+                    sidebar_divider(ui, &p);
+                    ui.add_space(4.0);
                     if let Some(r) = self.updater.available().cloned() {
                         ui.add_space(4.0);
                         let text = format!("Update to v{}", r.version);
@@ -1061,7 +1114,7 @@ impl FfrApp {
             .ctx()
             .animate_bool_with_time(resp.id.with("a"), active, theme::ANIM);
         let fill = Palette::mix(
-            Palette::mix(p.surface, p.raised, h),
+            Palette::mix(p.surface, p.hover_fill(), h),
             Palette::soft(p.accent, 50),
             a,
         );
@@ -1219,7 +1272,12 @@ impl FfrApp {
                         }
                     });
                 }
-                Dialog::Resume(s) => {
+                Dialog::Resume {
+                    session: s,
+                    unlocked,
+                    unmount,
+                } => {
+                    let (unlocked, unmount) = (*unlocked, *unmount);
                     widgets::section_title(ui, &p, "Resume the previous scan?");
                     let pct = if s.source.device.size > 0 {
                         s.bytes_scanned() as f64 / s.source.device.size as f64 * 100.0
@@ -1234,11 +1292,11 @@ impl FfrApp {
                     ui.horizontal(|ui| {
                         if widgets::primary_button(ui, &p, Some(Icon::Play), "Resume", true).clicked() {
                             keep = false;
-                            self.start_scan_now(Some((**s).clone()), false, false);
+                            self.start_scan_now(Some((**s).clone()), unlocked, unmount);
                         }
                         if widgets::secondary_button(ui, &p, Some(Icon::Refresh), "Start over", true).clicked() {
                             keep = false;
-                            self.start_scan_now(None, false, false);
+                            self.start_scan_now(None, unlocked, unmount);
                         }
                     });
                 }
@@ -1359,6 +1417,24 @@ impl FfrApp {
     }
 }
 
+fn sidebar_divider(ui: &mut egui::Ui, p: &Palette) {
+    let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
+    ui.painter()
+        .hline(r.x_range(), r.center().y, Stroke::new(1.0_f32, p.divider()));
+}
+
+fn sidebar_label(ui: &mut egui::Ui, p: &Palette, text: &str) {
+    ui.horizontal(|ui| {
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new(text)
+                .font(theme::semibold(10.5))
+                .color(Palette::mix(p.muted, p.surface, 0.15))
+                .extra_letter_spacing(1.2),
+        );
+    });
+}
+
 /// Newest unfinished checkpoint for this device and range.
 fn find_resumable(
     dir: &std::path::Path,
@@ -1450,6 +1526,8 @@ impl eframe::App for FfrApp {
             || self.updater.busy()
             || self.devices.refreshing()
             || self.pending_start.is_some()
+            || self.session_io.is_some()
+            || self.save_io.is_some()
         {
             ctx.request_repaint_after(Duration::from_millis(100));
         } else if self.screen == Screen::Source {

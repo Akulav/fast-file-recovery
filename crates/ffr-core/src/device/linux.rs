@@ -399,7 +399,7 @@ impl Platform for Os {
     }
 
     fn chown(path: &Path, uid: u32, gid: u32) {
-        let _ = std::os::unix::fs::chown(path, Some(uid), Some(gid));
+        let _ = std::os::unix::fs::lchown(path, Some(uid), Some(gid));
     }
 }
 

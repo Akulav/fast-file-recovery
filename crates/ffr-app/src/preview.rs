@@ -13,6 +13,8 @@ const HEX_BYTES: usize = 4096;
 const IMAGE_MAX: u64 = 48 << 20;
 
 struct Req {
+    /// Session generation; results for an older session are dropped.
+    generation: u64,
     id: u32,
     device: Arc<DeviceInfo>,
     hit: Hit,
@@ -21,6 +23,7 @@ struct Req {
 }
 
 struct Done {
+    generation: u64,
     id: u32,
     image: Option<ColorImage>,
     text: Option<String>,
@@ -42,6 +45,26 @@ pub struct PreviewManager {
     order: VecDeque<u32>,
     pending: HashSet<u32>,
     device: Option<Arc<DeviceInfo>>,
+    generation: u64,
+}
+
+/// Decode an image from disk bytes with tight limits; the bytes are untrusted.
+fn decode_image(bytes: &[u8]) -> Result<ColorImage, String> {
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16_384);
+    limits.max_image_height = Some(16_384);
+    limits.max_alloc = Some(256 << 20);
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| e.to_string())?;
+    reader.limits(limits);
+    // A decoder bug on damaged data must not take the preview thread down with it.
+    let img = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| reader.decode()))
+        .map_err(|_| "decoder error".to_string())?
+        .map_err(|e| e.to_string())?;
+    let t = img.thumbnail(640, 640).to_rgba8();
+    let size = [t.width() as usize, t.height() as usize];
+    Ok(ColorImage::from_rgba_unmultiplied(size, &t))
 }
 
 fn is_image(ext: &str) -> bool {
@@ -83,6 +106,7 @@ fn worker(rx: Receiver<Req>, tx: Sender<Done>) {
         }
         let Some((_, src)) = &handle else {
             let _ = tx.send(Done {
+                generation: req.generation,
                 id: req.id,
                 image: None,
                 text: None,
@@ -92,6 +116,7 @@ fn worker(rx: Receiver<Req>, tx: Sender<Done>) {
             continue;
         };
         let mut done = Done {
+            generation: req.generation,
             id: req.id,
             image: None,
             text: None,
@@ -108,12 +133,8 @@ fn worker(rx: Receiver<Req>, tx: Sender<Done>) {
             Ok(bytes) => {
                 done.hex = bytes[..bytes.len().min(HEX_BYTES)].to_vec();
                 if want_image {
-                    match image::load_from_memory(&bytes) {
-                        Ok(img) => {
-                            let t = img.thumbnail(640, 640).to_rgba8();
-                            let size = [t.width() as usize, t.height() as usize];
-                            done.image = Some(ColorImage::from_rgba_unmultiplied(size, &t));
-                        }
+                    match decode_image(&bytes) {
+                        Ok(img) => done.image = Some(img),
                         Err(e) => done.error = Some(format!("The image could not be decoded ({e}). It may be damaged or partly overwritten.")),
                     }
                 }
@@ -151,6 +172,7 @@ impl PreviewManager {
             order: VecDeque::new(),
             pending: HashSet::new(),
             device: None,
+            generation: 0,
         }
     }
 
@@ -160,6 +182,7 @@ impl PreviewManager {
         self.order.clear();
         self.pending.clear();
         self.device = None;
+        self.generation += 1;
     }
 
     pub fn get(&self, id: u32) -> Option<&Preview> {
@@ -184,6 +207,7 @@ impl PreviewManager {
         let ext = session.display_ext(&hit);
         self.pending.insert(id);
         let _ = self.tx.send(Req {
+            generation: self.generation,
             id,
             device: dev,
             hit,
@@ -195,6 +219,9 @@ impl PreviewManager {
     /// Turn finished decodes into textures (UI thread).
     pub fn poll(&mut self, ctx: &egui::Context) {
         while let Ok(d) = self.rx.try_recv() {
+            if d.generation != self.generation {
+                continue;
+            }
             self.pending.remove(&d.id);
             let texture = d.image.map(|img| {
                 ctx.load_texture(format!("preview-{}", d.id), img, TextureOptions::LINEAR)

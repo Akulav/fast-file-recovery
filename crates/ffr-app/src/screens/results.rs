@@ -341,7 +341,7 @@ fn filter_rail(r: &mut ResultsState, p: &Palette, ui: &mut Ui) {
                 ui.painter().rect_filled(
                     rect,
                     6,
-                    Palette::mix(Palette::transparent(), p.raised, h),
+                    Palette::mix(Palette::transparent(), p.hover_fill(), h),
                 );
                 let color = p.category(c);
                 let icon_rect = egui::Rect::from_center_size(

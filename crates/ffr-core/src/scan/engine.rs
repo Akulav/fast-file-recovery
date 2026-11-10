@@ -308,6 +308,7 @@ fn run(
         ));
     }
     let fingerprint = device::fingerprint(dev, &*src);
+    send(ScanEvent::Fingerprint(fingerprint.clone()));
     let mut session = match opts.resume.take() {
         Some(s) if s.fingerprint == fingerprint && s.source.range == source.range => *s,
         Some(_) => {

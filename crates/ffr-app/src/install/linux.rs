@@ -77,14 +77,28 @@ fn copy_self_to(dest: &Path) -> Result<(), String> {
     std::fs::rename(&tmp, dest).map_err(|e| e.to_string())
 }
 
+/// Quote a path for a `.desktop` `Exec=` key (Desktop Entry spec: quoted argument rules,
+/// then the string-value escaping of `\`).
+fn desktop_exec_arg(path: &str) -> String {
+    let mut q = String::from("\"");
+    for c in path.chars() {
+        if matches!(c, '"' | '`' | '$' | '\\') {
+            q.push('\\');
+        }
+        q.push(c);
+    }
+    q.push('"');
+    q.replace('\\', "\\\\").replace('%', "%%")
+}
+
 fn write_desktop_and_icons(bin: &Path) -> Result<(), String> {
     let desktop = desktop_path();
     if let Some(d) = desktop.parent() {
         std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
     }
     let entry = format!(
-        "[Desktop Entry]\nType=Application\nName={APP_NAME}\nComment=Recover deleted files — Made by Akulav\nExec=\"{}\"\nIcon={APP_ID}\nTerminal=false\nCategories=Utility;System;\nStartupWMClass={APP_ID}\nKeywords=recovery;undelete;restore;disk;\n",
-        bin.display()
+        "[Desktop Entry]\nType=Application\nName={APP_NAME}\nComment=Recover deleted files — Made by Akulav\nExec={}\nIcon={APP_ID}\nTerminal=false\nCategories=Utility;System;\nStartupWMClass={APP_ID}\nKeywords=recovery;undelete;restore;disk;\n",
+        desktop_exec_arg(&bin.to_string_lossy())
     );
     std::fs::write(&desktop, entry).map_err(|e| e.to_string())?;
     for (size, png) in ICONS {
@@ -184,4 +198,16 @@ pub fn cleanup_old() {
         let _ = std::fs::remove_file(me.with_extension("old"));
     }
     let _ = std::fs::remove_file(installed_bin().with_extension("old"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::desktop_exec_arg;
+
+    #[test]
+    fn exec_quoting() {
+        assert_eq!(desktop_exec_arg("/home/a/bin"), "\"/home/a/bin\"");
+        assert_eq!(desktop_exec_arg("/x/$y"), "\"/x/\\\\$y\"");
+        assert_eq!(desktop_exec_arg("/x/50%"), "\"/x/50%%\"");
+    }
 }

@@ -4,6 +4,26 @@ All notable changes to Fast File Recovery are documented here. The format follow
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-10
+
+### Changed
+- Cleaner, more polished look: softer dividers, gentle card shadows, disk cards that lift on hover and show a check mark when picked, buttons with a subtle glow, a refined segmented control and toggle, banners and notifications with a coloured edge, and a tidier sidebar with section labels and step lines that turn green as you go.
+- Buttons and toggles show a focus ring when you move through them with the keyboard.
+
+### Fixed
+- Recovery now checks that the connected disk is really the one the scan was made from. After a reboot or re-plug, disk numbers can change; before, a reopened scan could read the wrong disk and the "different disk" check could pass for the very disk being recovered.
+- The destination is checked again right before recovery starts, not only when it was picked.
+- Two recoveries started in the same second no longer share a folder, and recovery never overwrites an existing file.
+- Names in the CSV report that start with `=`, `+`, `-` or `@` can no longer run as formulas in spreadsheet apps.
+- Linux/macOS: when running as administrator, giving recovered files back to you no longer follows symbolic links, so it can't change the owner of other files.
+- Updates download into a private, freshly made folder, only from GitHub over HTTPS, with a size limit.
+- macOS: "Restart with administrator rights" works when the app sits in a folder whose name contains quotes or backslashes. Linux: the desktop entry works for install paths with special characters, and `pkexec` uses `/usr/bin/env` directly.
+- Creating a disk image can't overwrite the image it copies from, even when the path is written differently.
+- Previews from a previous scan no longer show up for files in a newly opened one, and a damaged image can't stop previews from working; very large images are refused instead of using lots of memory.
+- Opening a damaged or oversized scan file can't use up all memory.
+- "Resume the previous scan?" keeps your choice to scan without locking or to unmount first.
+- "Save scan…" reports success only after the file is written, and shows an error if saving fails.
+
 ## [0.1.1] - 2026-11-08
 
 ### Changed

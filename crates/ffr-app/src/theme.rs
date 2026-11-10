@@ -43,6 +43,48 @@ pub struct Palette {
     pub map_unread: Color32,
 }
 
+impl Palette {
+    /// Hairline used for dividers inside cards and panels (quieter than `border`).
+    pub fn divider(&self) -> Color32 {
+        Self::mix(self.border, self.bg, 0.35)
+    }
+    /// Fill of a hovered row or item on a surface.
+    pub fn hover_fill(&self) -> Color32 {
+        let base = if self.dark { self.raised } else { self.bg };
+        Self::mix(base, self.accent, 0.05)
+    }
+    /// Inset fill for text fields and tracks.
+    pub fn inset(&self) -> Color32 {
+        if self.dark {
+            Self::mix(self.bg, Color32::BLACK, 0.18)
+        } else {
+            Self::mix(self.bg, self.border, 0.25)
+        }
+    }
+    /// Keyboard focus ring.
+    pub fn focus(&self) -> Color32 {
+        Self::soft(self.accent, 150)
+    }
+    /// Soft layered shadow for raised elements.
+    pub fn soft_shadow(&self) -> Shadow {
+        Shadow {
+            offset: [0, 6],
+            blur: 22,
+            spread: 0,
+            color: self.shadow,
+        }
+    }
+    /// Very light shadow for resting cards (barely visible, adds depth).
+    pub fn rest_shadow(&self) -> Shadow {
+        Shadow {
+            offset: [0, 1],
+            blur: 3,
+            spread: 0,
+            color: Self::soft(Color32::BLACK, if self.dark { 50 } else { 12 }),
+        }
+    }
+}
+
 const fn hex(v: u32) -> Color32 {
     Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
 }
@@ -225,16 +267,17 @@ pub fn apply(ctx: &egui::Context, p: &Palette) {
     v.warn_fg_color = p.warning;
     v.error_fg_color = p.danger;
     v.selection.bg_fill = Palette::soft(p.accent, 70);
+    v.text_cursor.stroke = Stroke::new(2.0_f32, p.accent);
+    v.extreme_bg_color = p.inset();
+    v.faint_bg_color = Palette::mix(p.bg, p.surface, 0.55);
+    v.slider_trailing_fill = true;
+    v.handle_shape = egui::style::HandleShape::Circle;
+    v.interact_cursor = Some(egui::CursorIcon::PointingHand);
     v.selection.stroke = Stroke::new(1.0_f32, p.accent);
     v.window_corner_radius = CornerRadius::same(CARD_RADIUS);
     v.menu_corner_radius = CornerRadius::same(CONTROL_RADIUS);
     v.window_stroke = Stroke::new(1.0_f32, p.border);
-    v.window_shadow = Shadow {
-        offset: [0, 6],
-        blur: 24,
-        spread: 0,
-        color: p.shadow,
-    };
+    v.window_shadow = p.soft_shadow();
     v.popup_shadow = Shadow {
         offset: [0, 4],
         blur: 16,
@@ -246,7 +289,8 @@ pub fn apply(ctx: &egui::Context, p: &Palette) {
     let w = &mut v.widgets;
     w.noninteractive.bg_fill = p.surface;
     w.noninteractive.weak_bg_fill = p.surface;
-    w.noninteractive.bg_stroke = Stroke::new(1.0_f32, p.border);
+    // Separators and frames drawn by egui itself use this stroke: keep it quiet.
+    w.noninteractive.bg_stroke = Stroke::new(1.0_f32, p.divider());
     w.noninteractive.fg_stroke = Stroke::new(1.0_f32, p.text);
     w.noninteractive.corner_radius = r;
     w.inactive.bg_fill = p.raised;
@@ -256,7 +300,7 @@ pub fn apply(ctx: &egui::Context, p: &Palette) {
     w.inactive.corner_radius = r;
     w.hovered.bg_fill = Palette::mix(p.raised, p.accent, 0.12);
     w.hovered.weak_bg_fill = Palette::mix(p.raised, p.accent, 0.12);
-    w.hovered.bg_stroke = Stroke::new(1.0_f32, Palette::mix(p.border, p.accent, 0.5));
+    w.hovered.bg_stroke = Stroke::new(1.0_f32, Palette::mix(p.border, p.accent, 0.45));
     w.hovered.fg_stroke = Stroke::new(1.5_f32, p.text);
     w.hovered.corner_radius = r;
     w.hovered.expansion = 0.0;
@@ -282,6 +326,11 @@ pub fn apply(ctx: &egui::Context, p: &Palette) {
     style.spacing.item_spacing = egui::vec2(SPACE, SPACE * 0.75);
     style.spacing.button_padding = egui::vec2(12.0, 6.0);
     style.spacing.interact_size.y = 30.0;
+    style.spacing.icon_width = 16.0;
+    style.spacing.icon_width_inner = 9.0;
+    style.spacing.icon_spacing = 8.0;
+    style.spacing.combo_height = 280.0;
+    style.spacing.text_edit_width = 220.0;
     style.spacing.window_margin = Margin::same(16);
     style.spacing.menu_margin = Margin::same(6);
     style.spacing.scroll.bar_width = 8.0;
