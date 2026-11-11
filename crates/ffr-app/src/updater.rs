@@ -153,10 +153,13 @@ pub fn find_sum(sums: &str, name: &str) -> Option<String> {
     })
 }
 
-/// A fresh folder only this user can use. A fixed name in a shared temp folder would let
-/// another local user plant or swap the file between the checksum check and the install.
+/// A fresh folder inside the app's own folder (`<install folder>/update/`), never the shared temp
+/// folder, where another local user could plant or swap the file between the checksum check and
+/// the install. Removed again on the next start.
 fn private_dir(version: &Version) -> Result<PathBuf, String> {
-    let base = std::env::temp_dir();
+    let base = crate::paths::update_dir();
+    std::fs::create_dir_all(&base)
+        .map_err(|e| format!("Couldn't create a download folder: {e}"))?;
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())

@@ -11,6 +11,9 @@
 
 #define AppName "Fast File Recovery"
 #define AppExe "fast-file-recovery.exe"
+; Marks the install folder; the app keeps its settings, saved scans and logs next to it
+; (crates/ffr-app/src/install).
+#define Marker ".ffr-install"
 
 [Setup]
 ; AppId never changes: installing over an existing copy upgrades it in place.
@@ -30,7 +33,10 @@ VersionInfoProductName={#AppName}
 PrivilegesRequired=lowest
 DefaultDirName={localappdata}\Programs\FastFileRecovery
 DisableProgramGroupPage=yes
+; Ask for the folder on the first install only; updates reuse the previous one.
 DisableDirPage=auto
+UsePreviousAppDir=yes
+DirExistsWarning=no
 DefaultGroupName={#AppName}
 OutputBaseFilename=FastFileRecovery-setup
 OutputDir=..\dist
@@ -53,8 +59,10 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "romanian"; MessagesFile: "Romanian.isl"
 
 [CustomMessages]
-english.DeleteData=Also delete settings and saved scans?
-romanian.DeleteData=Ștergeți și setările și scanările salvate?
+english.DeleteData=Also delete settings, saved scans and logs?%n%nChoose No to keep them for a future reinstall.
+romanian.DeleteData=Ștergeți și setările, scanările salvate și jurnalele?%n%nAlegeți Nu pentru a le păstra pentru o reinstalare.
+english.DataNote=Fast File Recovery and everything it saves (settings, saved scans, logs) will be stored in this folder.
+romanian.DataNote=Fast File Recovery și tot ce salvează (setări, scanări salvate, jurnale) vor fi păstrate în acest dosar.
 english.LaunchApp=Launch Fast File Recovery
 romanian.LaunchApp=Pornește Fast File Recovery
 
@@ -75,6 +83,11 @@ Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchApp}"; Flags: nowait postin
 ; Silent update (/UPDATE): relaunch the app afterwards.
 Filename: "{app}\{#AppExe}"; Flags: nowait shellexec runasoriginaluser; Check: IsUpdate
 
+[UninstallDelete]
+Type: files; Name: "{app}\{#Marker}"
+; The downloaded update setup (in-app updates keep it in the app's own folder).
+Type: filesandordirs; Name: "{app}\update"
+
 [Code]
 function IsUpdate(): Boolean;
 var
@@ -86,16 +99,48 @@ begin
       Result := True;
 end;
 
+procedure InitializeWizard();
+begin
+  WizardForm.SelectDirLabel.Caption := WizardForm.SelectDirLabel.Caption + #13#10 + CustomMessage('DataNote');
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    SaveStringToFile(ExpandConstant('{app}\{#Marker}'), '{#AppVersion}', False);
+end;
+
+function HasAppData(Dir: String): Boolean;
+begin
+  Result := FileExists(Dir + '\settings.toml') or DirExists(Dir + '\sessions') or DirExists(Dir + '\logs');
+end;
+
+{ Only what the app itself creates, never anything else the user keeps in that folder. }
+procedure DeleteAppData(Dir: String);
+begin
+  DelTree(Dir + '\sessions', True, True, True);
+  DelTree(Dir + '\logs', True, True, True);
+  DelTree(Dir + '\update', True, True, True);
+  DeleteFile(Dir + '\settings.toml');
+  RemoveDir(Dir);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  DataDir: String;
+  AppDir, OldDir: String;
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    DataDir := ExpandConstant('{userappdata}\FastFileRecovery');
+    AppDir := ExpandConstant('{app}');
+    { Versions before 0.1.3 kept their data here. }
+    OldDir := ExpandConstant('{userappdata}\FastFileRecovery');
     { Never delete data when silent. }
-    if (not UninstallSilent) and DirExists(DataDir) then
+    if (not UninstallSilent) and (HasAppData(AppDir) or DirExists(OldDir)) then
       if MsgBox(CustomMessage('DeleteData'), mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
-        DelTree(DataDir, True, True, True);
+      begin
+        DeleteAppData(AppDir);
+        DelTree(OldDir, True, True, True);
+      end;
+    RemoveDir(AppDir);
   end;
 end;

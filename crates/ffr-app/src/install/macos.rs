@@ -1,44 +1,68 @@
-//! macOS self-install into `~/Applications/Fast File Recovery.app` (ad-hoc signed).
+//! macOS: the binary installs itself as `<folder>/Fast File Recovery.app` (ad-hoc signed) into a
+//! folder the user picks (default `~/Applications/Fast File Recovery`). Settings, saved scans and
+//! logs live in that same folder, next to the app.
 
-use super::{is_newer, version_of, StartupOffer};
+use super::unix::{copy_self_to, forget, offer_for, pointer_root, remember, swap_in};
+use super::{installed_root, same_path, StartupOffer};
 use crate::branding::{APP_NAME, BIN_NAME, VERSION};
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+pub use super::unix::on_installed_start;
+
 const ICNS: &[u8] = include_bytes!("../../../../assets/icons/icon.icns");
 
-fn app_dir() -> PathBuf {
+fn applications() -> PathBuf {
     crate::paths::user_home()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("Applications")
-        .join(format!("{APP_NAME}.app"))
 }
 
-fn bundle_bin() -> PathBuf {
-    app_dir().join("Contents/MacOS").join(BIN_NAME)
+/// Suggested install folder.
+pub fn default_install_dir() -> PathBuf {
+    applications().join(APP_NAME)
 }
 
-fn running_in_bundle() -> bool {
-    std::env::current_exe()
-        .map(|p| p.to_string_lossy().contains(".app/Contents/MacOS/"))
-        .unwrap_or(false)
+fn bundle(root: &Path) -> PathBuf {
+    root.join(format!("{APP_NAME}.app"))
+}
+
+fn installed_bin(root: &Path) -> PathBuf {
+    bundle(root).join("Contents/MacOS").join(BIN_NAME)
+}
+
+/// Versions before 0.1.3 installed the bundle straight into `~/Applications`.
+fn legacy_bundle() -> PathBuf {
+    bundle(&applications())
+}
+
+/// The remembered folder, or the default one when a pre-0.1.3 install exists.
+pub fn remembered_root() -> Option<PathBuf> {
+    pointer_root().or_else(|| legacy_bundle().is_dir().then(default_install_dir))
+}
+
+/// Running from a pre-0.1.3 bundle (after it updated itself): move into the new layout
+/// (`~/Applications/Fast File Recovery/Fast File Recovery.app`) and start from there.
+pub fn before_run() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let legacy = legacy_bundle();
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    if !legacy.is_dir() || !canon(&exe).starts_with(canon(&legacy)) {
+        return false;
+    }
+    match install_and_relaunch(&default_install_dir()) {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!("could not move the app to the new layout: {e}");
+            false
+        }
+    }
 }
 
 pub fn startup_offer() -> StartupOffer {
-    if running_in_bundle() {
-        return StartupOffer::None;
-    }
-    let bin = bundle_bin();
-    if !bin.exists() {
-        return StartupOffer::Install;
-    }
-    let installed = version_of(&bin);
-    if is_newer(VERSION, installed.as_deref()) {
-        StartupOffer::UpdateInstalled { installed }
-    } else {
-        StartupOffer::None
-    }
+    offer_for(remembered_root(), installed_bin, default_install_dir())
 }
 
 fn info_plist() -> String {
@@ -71,40 +95,57 @@ fn sign(path: &Path) {
         .output();
 }
 
-pub fn install_and_relaunch() -> Result<(), String> {
-    let app = app_dir();
-    let macos = app.join("Contents/MacOS");
+fn open(app: &Path) -> Result<(), String> {
+    Command::new("/usr/bin/open")
+        .arg("-n")
+        .arg(app)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Couldn't open {}: {e}", app.display()))
+}
+
+/// Build `<root>/Fast File Recovery.app` around a copy of this binary, mark and remember the
+/// folder, remove a pre-0.1.3 bundle, then open the app.
+pub fn install_and_relaunch(root: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(root)
+        .map_err(|e| format!("Couldn't create {}: {e}", root.display()))?;
+    let app = bundle(root);
     let res = app.join("Contents/Resources");
-    std::fs::create_dir_all(&macos).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&res).map_err(|e| e.to_string())?;
-    let me = std::env::current_exe().map_err(|e| e.to_string())?;
-    let bin = bundle_bin();
-    let tmp = bin.with_extension("new");
-    std::fs::copy(&me, &tmp).map_err(|e| format!("Couldn't copy the program: {e}"))?;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
-        .map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &bin).map_err(|e| e.to_string())?;
+    copy_self_to(&installed_bin(root))?;
     std::fs::write(res.join("icon.icns"), ICNS).map_err(|e| e.to_string())?;
     std::fs::write(app.join("Contents/Info.plist"), info_plist()).map_err(|e| e.to_string())?;
     sign(&app);
-    Command::new("/usr/bin/open")
-        .arg(&app)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("Installed, but couldn't open it: {e}"))
+    super::write_marker(root).map_err(|e| e.to_string())?;
+    remember(root);
+    let legacy = legacy_bundle();
+    if legacy.is_dir() && !same_path(&legacy, &app) {
+        let _ = std::fs::remove_dir_all(&legacy);
+    }
+    open(&app)
 }
 
 pub fn uninstall(delete_data: bool) -> Result<String, String> {
+    let Some(root) = installed_root() else {
+        return Ok("Nothing to remove; Fast File Recovery is not installed.".into());
+    };
     let mut removed = Vec::new();
-    if std::fs::remove_dir_all(app_dir()).is_ok() {
-        removed.push(app_dir().display().to_string());
+    if std::fs::remove_dir_all(bundle(&root)).is_ok() {
+        removed.push(bundle(&root).display().to_string());
     }
+    let _ = std::fs::remove_file(root.join(super::MARKER));
+    forget();
     if delete_data {
-        let d = crate::paths::config_dir();
-        if std::fs::remove_dir_all(&d).is_ok() {
-            removed.push(d.display().to_string());
+        super::delete_data(&root);
+        if let Some(d) = crate::paths::legacy_config_dir() {
+            let _ = std::fs::remove_dir_all(d);
         }
+        removed.push(format!(
+            "settings, saved scans and logs in {}",
+            root.display()
+        ));
     }
+    let _ = std::fs::remove_dir(&root);
     if removed.is_empty() {
         Ok("Nothing to remove; Fast File Recovery is not installed.".into())
     } else {
@@ -112,42 +153,26 @@ pub fn uninstall(delete_data: bool) -> Result<String, String> {
     }
 }
 
+/// Swap the running binary for the verified download, re-sign the bundle, relaunch.
 pub fn apply_update(new: &Path) -> Result<(), String> {
-    let target = if bundle_bin().exists() {
-        bundle_bin()
-    } else {
-        std::env::current_exe().map_err(|e| e.to_string())?
-    };
-    let staged = target.with_extension("new");
-    std::fs::copy(new, &staged).map_err(|e| format!("Couldn't stage the update: {e}"))?;
-    std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))
-        .map_err(|e| e.to_string())?;
-    let old = target.with_extension("old");
-    let _ = std::fs::remove_file(&old);
-    std::fs::rename(&target, &old).map_err(|e| e.to_string())?;
-    if let Err(e) = std::fs::rename(&staged, &target) {
-        let _ = std::fs::rename(&old, &target);
-        return Err(e.to_string());
-    }
-    if target == bundle_bin() {
-        sign(&app_dir());
-        Command::new("/usr/bin/open")
-            .arg("-n")
-            .arg(app_dir())
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| e.to_string())
-    } else {
-        Command::new(&target)
+    let target = std::env::current_exe().map_err(|e| e.to_string())?;
+    swap_in(new, &target)?;
+    match installed_root().filter(|r| same_path(&installed_bin(r), &target)) {
+        Some(root) => {
+            sign(&bundle(&root));
+            open(&bundle(&root))
+        }
+        None => Command::new(&target)
             .arg("--here")
             .spawn()
             .map(|_| ())
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string()),
     }
 }
 
 pub fn cleanup_old() {
     if let Ok(me) = std::env::current_exe() {
         let _ = std::fs::remove_file(me.with_extension("old"));
+        let _ = std::fs::remove_file(me.with_extension("new"));
     }
 }

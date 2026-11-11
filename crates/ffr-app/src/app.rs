@@ -364,6 +364,9 @@ pub struct FfrApp {
     last_frame: Instant,
     geom_changed: Option<Instant>,
     pub category_totals: [(u64, u64); 6],
+    /// Folder typed into the install dialog (Linux/macOS).
+    install_dir_edit: String,
+    install_error: Option<String>,
 }
 
 impl FfrApp {
@@ -401,6 +404,11 @@ impl FfrApp {
             last_frame: Instant::now(),
             geom_changed: None,
             category_totals: [(0, 0); 6],
+            install_dir_edit: match &startup {
+                StartupOffer::Install { suggested } => suggested.display().to_string(),
+                _ => String::new(),
+            },
+            install_error: None,
         };
         app.preset_label = screens::settings::preset_name(&app.settings.enabled_formats);
         if startup != StartupOffer::None {
@@ -1241,30 +1249,63 @@ impl FfrApp {
                     });
                 }
                 Dialog::Install(offer) => {
-                    let (title, text, action) = match offer {
-                        StartupOffer::UpdateInstalled { installed } => (
+                    let offer = offer.clone();
+                    let (title, text, action) = match &offer {
+                        StartupOffer::UpdateInstalled { root, installed } => (
                             "Update the installed copy?",
                             format!(
-                                "Version {} is installed. This file is version {VERSION}.",
-                                installed.clone().unwrap_or_else(|| "?".into())
+                                "{} is installed in {}. This file is version {VERSION}. Your settings and saved scans stay where they are.",
+                                installed
+                                    .as_deref()
+                                    .map(|v| format!("Version {v}"))
+                                    .unwrap_or_else(|| "An older version".into()),
+                                root.display()
                             ),
                             "Update installed copy",
                         ),
                         _ => (
                             "Install Fast File Recovery?",
-                            "Install it for this user so it appears in your applications and can update itself. Nothing is installed system-wide.".to_string(),
-                            "Install for this user",
+                            "Choose a folder. The app and everything it saves (settings, saved scans, logs) go there, and updates keep using it. Nothing is installed system-wide.".to_string(),
+                            "Install",
                         ),
                     };
                     widgets::section_title(ui, &p, title);
                     ui.label(widgets::muted(&p, text));
+                    if matches!(offer, StartupOffer::Install { .. }) {
+                        ui.add_space(8.0);
+                        ui.label(widgets::small_muted(&p, "Install folder"));
+                        let edit = egui::TextEdit::singleline(&mut self.install_dir_edit)
+                            .desired_width(f32::INFINITY);
+                        if ui.add(edit).changed() {
+                            self.install_error = None;
+                        }
+                        let extras = if cfg!(target_os = "macos") {
+                            "Creates Fast File Recovery.app in this folder."
+                        } else {
+                            "Also adds an app-menu entry and the fast-file-recovery command."
+                        };
+                        ui.label(widgets::small_muted(&p, extras));
+                    }
+                    if let Some(err) = &self.install_error {
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(err).color(p.danger));
+                    }
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         if widgets::primary_button(ui, &p, Some(Icon::Download), action, true).clicked() {
-                            keep = false;
-                            match crate::install::install_and_relaunch() {
-                                Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-                                Err(e) => self.toasts.error(e),
+                            let result = match &offer {
+                                StartupOffer::UpdateInstalled { root, .. } => {
+                                    crate::install::install_and_relaunch(root)
+                                }
+                                _ => crate::install::parse_install_dir(&self.install_dir_edit)
+                                    .and_then(|dir| crate::install::install_and_relaunch(&dir)),
+                            };
+                            match result {
+                                Ok(()) => {
+                                    keep = false;
+                                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                                }
+                                Err(e) => self.install_error = Some(e),
                             }
                         }
                         if widgets::secondary_button(ui, &p, None, "Just run it", true).clicked() {

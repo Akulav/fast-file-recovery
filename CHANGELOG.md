@@ -4,6 +4,26 @@ All notable changes to Fast File Recovery are documented here. The format follow
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-12
+
+### Changed
+- Everything the app saves now lives in the folder you installed it to: settings, saved scans, logs and downloaded
+  updates. Nothing goes to `%APPDATA%`, `~/.config`, `~/.local/state` or the temp folder any more. Settings and saved
+  scans from earlier versions are moved in on the first start, also when the install folder is on another drive.
+- Linux and macOS: installing asks which folder to use (default `~/.local/share/fast-file-recovery` or
+  `~/Applications/Fast File Recovery`), and a newer download offers to update the copy in that folder. An existing
+  install is picked up automatically; on macOS the app moves from `~/Applications/Fast File Recovery.app` into
+  `~/Applications/Fast File Recovery/`.
+- Windows: the setup notes that all data is stored in the chosen folder, updates always install into the same folder,
+  and the uninstaller offers to delete settings, saved scans and logs from it.
+- One build workflow, the same as the other Akulav apps: every push is checked and built for all three systems, and a
+  new version is released automatically. The Linux build now runs on older distributions too (glibc 2.28+).
+- New README in the same style as the other Akulav apps.
+
+### Added
+- `--portable` (or an empty `portable.txt` next to the program) keeps data next to the program and never offers to
+  install.
+
 ## [0.1.2] - 2026-11-10
 
 ### Changed

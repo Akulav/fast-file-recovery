@@ -1,0 +1,235 @@
+# Builds and tests Windows, Linux and macOS on every push and PR.
+#
+# Every release ships exactly one file per OS, and that file both installs and updates:
+#   FastFileRecovery-setup.exe       Windows x64 (Inno Setup; asks for the folder once, updates reuse it)
+#   fast-file-recovery-linux-x64     Linux x64 (installs itself into a folder you pick)
+#   fast-file-recovery-macos-arm64   macOS Apple Silicon (installs itself as an .app into a folder you pick)
+# plus SHA256SUMS.txt, which installed copies verify their updates against.
+# These names are API: installed copies look for them. Never rename them.
+#
+# Releasing is automatic: bump the version in Cargo.toml ([workspace.package]), add its section to
+# CHANGELOG.md and push to main. When no release with that version exists yet, the `release` job
+# tags the commit (e.g. `v0.1.3`) and publishes the release. Pushing a tag by hand works too.
+# A version with a hyphen (0.2.0-beta.1) becomes a pre-release.
+
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # Only CI builds may update themselves (crates/ffr-app/src/branding.rs).
+  FFR_RELEASE_BUILD: "1"
+
+jobs:
+  meta:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(awk '/^\[workspace.package\]/{f=1;next} /^\[/{f=0} f && /^version/{gsub(/"/,"",$3); print $3; exit}' Cargo.toml)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          for crate in ffr-core ffr-app xtask; do
+            v=$(awk -v n="$crate" '$0=="name = \""n"\""{getline; gsub(/version = |"/,""); print; exit}' Cargo.lock)
+            if [ "$v" != "$version" ]; then echo "::error::Cargo.lock has $crate $v, expected $version"; exit 1; fi
+          done
+          release=false
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            if [[ "${GITHUB_REF_NAME#v}" != "$version" ]]; then
+              echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+              exit 1
+            fi
+            release=true
+          elif [[ "$GITHUB_EVENT_NAME" != "pull_request" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+            if gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Release v$version already exists, nothing to publish."
+            else
+              release=true
+            fi
+          fi
+          if [[ "$release" == "true" ]] && ! grep -q "^## \[$version\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no section for $version"
+            exit 1
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
+          echo "### Fast File Recovery $version (release: $release)" >> "$GITHUB_STEP_SUMMARY"
+
+  lint:
+    name: Format & Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  windows:
+    name: Windows x64
+    needs: meta
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Build
+        run: cargo build --release --locked -p ffr-app
+      - name: Setup (install + update in one file)
+        shell: pwsh
+        run: |
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc "/DAppVersion=${{ needs.meta.outputs.version }}" "/DSourceExe=$PWD\target\release\fast-file-recovery.exe" installer\ffr.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item dist\FastFileRecovery-setup.exe .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FastFileRecovery-setup.exe
+          path: FastFileRecovery-setup.exe
+          if-no-files-found: error
+
+  linux:
+    name: Linux x64
+    needs: meta
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux GUI packages (tests)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+      - name: Install Zig (for an old-glibc build that runs on most distros)
+        run: |
+          pip install ziglang
+          cargo install cargo-zigbuild --locked
+      - name: Test
+        run: |
+          cargo test --workspace --locked
+          cargo test -p ffr-core --release --locked -- --ignored
+      - name: Build (glibc 2.28+)
+        run: |
+          cargo zigbuild --release --locked -p ffr-app --target x86_64-unknown-linux-gnu.2.28
+          cp target/x86_64-unknown-linux-gnu/release/fast-file-recovery fast-file-recovery-linux-x64
+          chmod +x fast-file-recovery-linux-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fast-file-recovery-linux-x64
+          path: fast-file-recovery-linux-x64
+          if-no-files-found: error
+
+  macos:
+    name: macOS Apple Silicon
+    needs: meta
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Build
+        run: |
+          cargo build --release --locked -p ffr-app --target aarch64-apple-darwin
+          cp target/aarch64-apple-darwin/release/fast-file-recovery fast-file-recovery-macos-arm64
+          chmod +x fast-file-recovery-macos-arm64
+          codesign --force -s - fast-file-recovery-macos-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fast-file-recovery-macos-arm64
+          path: fast-file-recovery-macos-arm64
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [meta, lint, windows, linux, macos]
+    if: needs.meta.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums and notes
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          BASE: https://github.com/${{ github.repository }}/releases/download/v${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd dist
+          chmod +x fast-file-recovery-linux-x64 fast-file-recovery-macos-arm64
+          sha256sum FastFileRecovery-setup.exe fast-file-recovery-linux-x64 fast-file-recovery-macos-arm64 > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          {
+            echo "## Fast File Recovery $VERSION"
+            echo
+            echo "_Made by **Akulav**: no spyware, no telemetry. It never writes to the disk you are saving._"
+            echo
+            awk -v v="$VERSION" 'index($0, "## [" v "]")==1 {f=1; next} /^## \[/ {f=0} f' ../CHANGELOG.md
+            echo
+            echo "One file per system. The same file installs the app and later updates it."
+            echo
+            echo "| System | Download | First start |"
+            echo "| --- | --- | --- |"
+            echo "| Windows 10/11 (x64) | [FastFileRecovery-setup.exe]($BASE/FastFileRecovery-setup.exe) | Asks where to install. Updates reuse that folder. |"
+            echo "| Linux x64 (glibc 2.28+) | [fast-file-recovery-linux-x64]($BASE/fast-file-recovery-linux-x64) | \`chmod +x\` it and run it. It asks where to install. |"
+            echo "| macOS Apple Silicon | [fast-file-recovery-macos-arm64]($BASE/fast-file-recovery-macos-arm64) | \`chmod +x\`, then right-click → Open. It asks where to install. |"
+            echo
+            echo "The app and everything it saves (settings, saved scans, logs) live in the folder you choose."
+            echo "Installed copies update themselves in one click, verified with SHA-256."
+            echo
+            echo "<details><summary>SHA-256 checksums</summary>"
+            echo
+            echo '```'
+            cat SHA256SUMS.txt
+            echo '```'
+            echo "</details>"
+            echo
+          } > notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.meta.outputs.version }}
+          name: Fast File Recovery v${{ needs.meta.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          body_path: dist/notes.md
+          prerelease: ${{ needs.meta.outputs.prerelease == 'true' }}
+          make_latest: ${{ needs.meta.outputs.prerelease != 'true' }}
+          files: |
+            dist/FastFileRecovery-setup.exe
+            dist/fast-file-recovery-linux-x64
+            dist/fast-file-recovery-macos-arm64
+            dist/SHA256SUMS.txt

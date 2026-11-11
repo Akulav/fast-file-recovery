@@ -18,10 +18,12 @@ use branding::{APP_NAME, VERSION};
 use std::process::ExitCode;
 use std::sync::Arc;
 
-const USAGE: &str = "Usage: fast-file-recovery [--version] [--here] [--uninstall [--delete-data]]
+const USAGE: &str =
+    "Usage: fast-file-recovery [--version] [--here] [--portable] [--uninstall [--delete-data]]
 
   --version              print the version and exit
   --here                 run without installing or asking to install
+  --portable             keep data next to the program and never offer to install
   --uninstall            remove the installed copy (keeps settings and saved scans)
   --delete-data          with --uninstall, also delete settings, saved scans and logs";
 
@@ -112,23 +114,32 @@ fn main() -> ExitCode {
             }
         };
     }
-    if let Some(unknown) = args
-        .iter()
-        .find(|a| a.starts_with('-') && !["--here", "--elevated"].contains(&a.as_str()))
-    {
+    if let Some(unknown) = args.iter().find(|a| {
+        a.starts_with('-') && !["--here", "--elevated", "--portable"].contains(&a.as_str())
+    }) {
         platform_window::attach_console();
         eprintln!("unknown option {unknown}\n\n{USAGE}");
         return ExitCode::from(2);
     }
     elevate::set_elevated_flag(has("--elevated"));
+    if has("--portable") {
+        std::env::set_var("FFR_PORTABLE", "1");
+    }
+    // The elevated copy on Linux/macOS (and anything run as root there) never installs, updates
+    // or moves files. Windows always runs as administrator, so that alone doesn't count.
+    let may_install = !elevate::is_elevated_instance() && !(cfg!(unix) && elevate::is_elevated());
+    // Before logging starts, so logs from older versions can still be moved into the install folder.
+    let boot = install::on_startup(has("--here"), may_install);
+    if boot.exit {
+        return ExitCode::SUCCESS;
+    }
     let _log = init_logging();
     tracing::info!("{APP_NAME} {VERSION} starting ({})", branding::os_arch());
-    install::cleanup_old();
-    let startup = if has("--here") || elevate::is_elevated_instance() || elevate::is_elevated() {
-        install::StartupOffer::None
-    } else {
-        install::startup_offer()
-    };
+    tracing::info!("data folder: {}", paths::data_dir().display());
+    for note in &boot.notes {
+        tracing::info!("{note}");
+    }
+    let startup = boot.offer;
     let settings = settings::Settings::load();
 
     let run = |renderer: eframe::Renderer,

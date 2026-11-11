@@ -5,12 +5,12 @@
 | OS | Target | Release file (the only file for that OS) |
 |---|---|---|
 | Windows 10/11 x64 | `x86_64-pc-windows-msvc` | `FastFileRecovery-setup.exe` |
-| Linux x64 | `x86_64-unknown-linux-gnu` (built on Ubuntu 22.04 for glibc 2.35) | `fast-file-recovery-linux-x64` |
+| Linux x64 | `x86_64-unknown-linux-gnu` (built with `cargo zigbuild` for glibc 2.28+) | `fast-file-recovery-linux-x64` |
 | macOS Apple Silicon | `aarch64-apple-darwin` | `fast-file-recovery-macos-arm64` |
 
 The same file does both jobs on each OS: it installs the app the first time and updates it later. There are no separate update packages, no DMG, no MSI and no zip. Each release has three binaries plus `SHA256SUMS.txt`.
 
-This file is the architecture spec and the working rules. The release flow, versioning, installer, updater and README layout follow [Akulav/local-ai-ui](https://github.com/Akulav/local-ai-ui) on purpose. When this file is unclear, do what that project does.
+This file is the architecture spec and the working rules. The release workflow, installer, updater, data location, license and README layout follow [Akulav/akulav-mc-launcher](https://github.com/Akulav/akulav-mc-launcher) on purpose. When this file is unclear, do what that project does.
 
 ---
 
@@ -99,8 +99,7 @@ Do not add a dependency that needs a C toolchain beyond MSVC or the system linke
 │  │     └─ branding.rs       # name, author, repo URL, version constants
 │  └─ xtask/                  # cargo xtask bump|release|icons|installer-images|dist|check
 └─ .github/workflows/
-   ├─ ci.yml
-   └─ release.yml
+   └─ build.yml               # Build & Release (same logic as akulav-mc-launcher)
 ```
 
 ---
@@ -277,13 +276,26 @@ Events are batched by the engine to at most 10 per second. The GUI drains the ch
 
 ## 7. Settings and data locations
 
-| OS | Settings, sessions, logs | Installed program |
-|---|---|---|
-| Windows | `%APPDATA%\FastFileRecovery\` (`settings.toml`, `sessions\`, `logs\`) | `%LOCALAPPDATA%\Programs\FastFileRecovery\fast-file-recovery.exe` (per user, Inno) |
-| Linux | `~/.config/fast-file-recovery/`, logs in `~/.local/state/fast-file-recovery/` | `~/.local/share/fast-file-recovery/fast-file-recovery` + `~/.local/bin/fast-file-recovery` symlink |
-| macOS | `~/Library/Application Support/FastFileRecovery/` | `~/Applications/Fast File Recovery.app` |
+**Everything the app writes lives in the install folder the user chose, next to the program.** Never `%APPDATA%`, `~/.config`, `~/.local/state`, the temp folder or any other system folder (`paths.rs`, `install/mod.rs`).
 
-When elevated on Linux/macOS, these paths resolve against the **original user's** home (`FFR_ORIG_UID`), never root's. Logs rotate daily and keep 7 files. Updates never touch settings, sessions or logs. Settings have a `version` field and migrate forward.
+| File / folder in the install folder | Contents |
+|---|---|
+| `settings.toml` | settings (window geometry included) |
+| `sessions/` | saved and resumable scans |
+| `logs/` | daily logs, 7 kept |
+| `update/` | a downloaded update while it is applied (removed on the next start) |
+| `.ffr-install` | marker; holds the installed version |
+
+| OS | Default install folder (user picks any) |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Programs\FastFileRecovery\` (Inno asks once) |
+| Linux | `~/.local/share/fast-file-recovery/` + `~/.local/bin/fast-file-recovery` symlink, menu entry, icons |
+| macOS | `~/Applications/Fast File Recovery/` holding `Fast File Recovery.app` |
+
+- Not installed ("Just run it", `--portable`, dev builds): data goes next to the program. `FFR_DATA_DIR` overrides.
+- Only outside the folder: shortcuts/menu entries/icons, and on Linux/macOS a one-line pointer to the install folder (`<old config dir>/install-dir`; Windows uses Inno's own registry entry).
+- Data from versions before 0.1.3 (`%APPDATA%\FastFileRecovery`, `~/.config/fast-file-recovery` + `~/.local/state/fast-file-recovery`, `~/Library/Application Support/FastFileRecovery`) is moved into the install folder on the first start of the installed copy, across drives too.
+- The elevated copy on Linux/macOS runs from the same folder and hands files it writes back to `FFR_ORIG_UID`; it never installs, updates or moves data. Updates never touch settings, sessions or logs. Settings have a `version` field and migrate forward.
 
 ---
 
@@ -292,24 +304,25 @@ When elevated on Linux/macOS, these paths resolve against the **original user's*
 ### 8.1 Windows: Inno Setup (`installer/ffr.iss`)
 
 - `FastFileRecovery-setup.exe` holds the app exe. It is the first-install wizard **and** the update package.
-- `AppId={{<GUID generated once>}` **never changes.** `PrivilegesRequired=lowest`, `DefaultDirName={localappdata}\Programs\FastFileRecovery`, `DisableProgramGroupPage=yes`, `SetupIconFile=..\assets\icons\icon.ico`, `UninstallDisplayIcon={app}\fast-file-recovery.exe`, `WizardStyle=modern`, `WizardImageFile`/`WizardSmallImageFile` from `installer/`, `AppPublisher=Akulav`, `AppVersion` from `/DAppVersion=` on the `iscc` command line, `VersionInfoVersion`, `VersionInfoCompany=Akulav`, `VersionInfoDescription=Fast File Recovery Setup`, `CloseApplications=force`, `ArchitecturesAllowed=x64compatible`. Languages: English and Romanian.
+- `AppId={{<GUID generated once>}` **never changes.** `PrivilegesRequired=lowest`, `DefaultDirName={localappdata}\Programs\FastFileRecovery`, `DisableDirPage=auto` + `UsePreviousAppDir=yes` (asks for the folder once, with a note that all data goes there), writes `{app}\.ffr-install` after install, `DisableProgramGroupPage=yes`, `SetupIconFile=..\assets\icons\icon.ico`, `UninstallDisplayIcon={app}\fast-file-recovery.exe`, `WizardStyle=modern`, `WizardImageFile`/`WizardSmallImageFile` from `installer/`, `AppPublisher=Akulav`, `AppVersion` from `/DAppVersion=` on the `iscc` command line, `VersionInfoVersion`, `VersionInfoCompany=Akulav`, `VersionInfoDescription=Fast File Recovery Setup`, `CloseApplications=force`, `ArchitecturesAllowed=x64compatible`. Languages: English and Romanian.
 - Shortcuts: Start menu (always), desktop (optional task, checked by default).
 - **Update mode:** the app runs `FastFileRecovery-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /UPDATE` and exits. A `[Code]` function `IsUpdate()` checks for `/UPDATE`, and the `[Run]` entry `Filename: {app}\fast-file-recovery.exe; Flags: nowait runasoriginaluser; Check: IsUpdate` relaunches the app after a silent update. The interactive install ends with a normal "Launch Fast File Recovery" `postinstall` checkbox.
 - Installing over an existing install upgrades it in place (same AppId). No old-uninstaller dance is needed in v1.
-- **Uninstall:** removes the program and shortcuts, then asks "Also delete settings and saved scans?" (default No). It never deletes data when silent.
+- **Update mode** passes `/DIR=<current install folder>` so the update always lands in the same folder.
+- **Uninstall:** removes the program and shortcuts, then asks "Also delete settings, saved scans and logs?" (default No) and deletes only the app's own entries in `{app}` (plus the pre-0.1.3 `%APPDATA%\FastFileRecovery`). It never deletes data when silent.
 - `.iss` files are **UTF-8 with BOM.**
 
 ### 8.2 Linux: self-installing binary
 
 `fast-file-recovery-linux-x64`, on start:
-- If it runs from outside the install dir and no install exists → show a small **install dialog** in the egui window ("Install for this user" / "Just run it"). Install = copy itself to `~/.local/share/fast-file-recovery/`, `chmod 755`, symlink `~/.local/bin/fast-file-recovery`, write `~/.local/share/applications/fast-file-recovery.desktop` (`Comment=Recover deleted files — Made by Akulav`, `Icon=fast-file-recovery`, `StartupWMClass=fast-file-recovery`), write icons from embedded PNGs into `~/.local/share/icons/hicolor/<size>/apps/`, run `update-desktop-database`/`gtk-update-icon-cache` if present (ignore failures), then relaunch from the install location.
-- If an install exists and this binary is newer → offer "Update installed copy".
-- Flags: `--version`, `--here` (run without installing or prompting), `--uninstall [--delete-data]`.
+- If it runs from outside the install folder and no install exists → show a small **install dialog** in the egui window with an **install folder** field (default `~/.local/share/fast-file-recovery`) and "Install" / "Just run it". Install = copy itself to `<folder>/fast-file-recovery`, write `.ffr-install`, remember the folder, `chmod 755`, symlink `~/.local/bin/fast-file-recovery`, write `~/.local/share/applications/fast-file-recovery.desktop` (`Comment=Recover deleted files — Made by Akulav`, `Icon=fast-file-recovery`, `StartupWMClass=fast-file-recovery`), write icons from embedded PNGs into `~/.local/share/icons/hicolor/<size>/apps/`, run `update-desktop-database`/`gtk-update-icon-cache` if present (ignore failures), then relaunch from the install location.
+- If an install exists and this binary is newer → offer "Update installed copy" (into its folder).
+- Flags: `--version`, `--here` (run without installing or prompting), `--portable`, `--uninstall [--delete-data]`.
 
 ### 8.3 macOS: self-installing binary
 
 `fast-file-recovery-macos-arm64` (ad-hoc signed with `codesign -s -` in CI), on start:
-- If it isn't running from inside `Fast File Recovery.app` → offer install: create `~/Applications/Fast File Recovery.app/Contents/{MacOS,Resources}`, copy itself to `Contents/MacOS/fast-file-recovery`, write the embedded `icon.icns` and an `Info.plist` (`CFBundleIdentifier=com.akulav.fastfilerecovery`, `CFBundleIconFile=icon`, `CFBundleShortVersionString`, `NSHumanReadableCopyright=Made by Akulav`, `LSMinimumSystemVersion=12.0`, `NSHighResolutionCapable=true`), ad-hoc sign the bundle (`codesign --force --deep -s -`), then `open` it.
+- If it isn't running from an installed `Fast File Recovery.app` → offer install into a folder the user picks (default `~/Applications/Fast File Recovery`): create `<folder>/Fast File Recovery.app/Contents/{MacOS,Resources}`, write `<folder>/.ffr-install`, copy itself to `Contents/MacOS/fast-file-recovery`, write the embedded `icon.icns` and an `Info.plist` (`CFBundleIdentifier=com.akulav.fastfilerecovery`, `CFBundleIconFile=icon`, `CFBundleShortVersionString`, `NSHumanReadableCopyright=Made by Akulav`, `LSMinimumSystemVersion=12.0`, `NSHighResolutionCapable=true`), ad-hoc sign the bundle (`codesign --force --deep -s -`), then `open` it.
 - Same `--version`, `--here`, `--uninstall [--delete-data]` flags.
 - The README explains the first-open steps for a quarantined download: right-click → Open, or `xattr -d com.apple.quarantine <file>`.
 
@@ -317,7 +330,7 @@ When elevated on Linux/macOS, these paths resolve against the **original user's*
 
 - **Source:** `https://api.github.com/repos/Akulav/fast-file-recovery/releases/latest` (pre-releases only if the current version is a pre-release). The User-Agent is `fast-file-recovery/<version>`.
 - **When:** 20 s after start and every 6 h if "Check automatically" is on (default on), plus the **Check for updates** button. A check never blocks the UI (background thread + channel). Results: up to date / update available (version + notes) / error (shown, retry offered).
-- **Update button:** download the asset for this OS (exact names from the table at the top) to a temp file with a progress bar → download `SHA256SUMS.txt` → **verify SHA-256** (mismatch → delete, error, stop) → apply:
+- **Update button:** download the asset for this OS (exact names from the table at the top) into a fresh folder under `<install folder>/update/` (never the temp folder) with a progress bar → download `SHA256SUMS.txt` → **verify SHA-256** (mismatch → delete, error, stop) → apply:
   - Windows: run the setup in update mode (§8.1), exit the app.
   - Linux: write `<install>.new`, `chmod 755`, rename the current binary to `.old`, rename `.new` into place (atomic on the same fs), relaunch, exit. The next start deletes `.old`.
   - macOS: same swap inside `Contents/MacOS/`, re-sign the bundle ad-hoc, relaunch via `open -n`, exit.
@@ -355,21 +368,15 @@ When elevated on Linux/macOS, these paths resolve against the **original user's*
 
 ## 11. CI and release workflows
 
-### `ci.yml`: every push and pull request
-Matrix `windows-latest`, `ubuntu-22.04`, `macos-15`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`. Linux installs `libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev`. Cache with `Swatinem/rust-cache`. Use only maintained actions (`actions/checkout@v4`, `dtolnay/rust-toolchain`, `softprops/action-gh-release@v2` or `gh` CLI).
+One workflow, `.github/workflows/build.yml` (**Build & Release**), the same logic as akulav-mc-launcher. It runs on every push to `main`, every tag, every pull request and `workflow_dispatch`; `permissions: contents: write`; `FFR_RELEASE_BUILD=1` for every job. Use only maintained actions (`actions/checkout@v4`, `dtolnay/rust-toolchain`, `Swatinem/rust-cache@v2`, `softprops/action-gh-release@v2`).
 
-### `release.yml`: publishes a release
-- **Triggers:** push to `main` that changes `Cargo.toml` or `.github/workflows/release.yml`, plus `workflow_dispatch` (republish the current version, e.g. after a failed run).
-- `permissions: contents: write`; `concurrency: release`.
-- **Jobs:**
-  1. **check:** read the version from `Cargo.toml`, check it matches every crate and `Cargo.lock`. If tag `vX.Y.Z` exists → set `skip=true` (nothing is published twice). A hyphen → `prerelease=true`. Changelog section must exist.
-  2. **tests** (needs check, if not skip): Windows + Ubuntu 22.04 + macOS 15, `cargo test --workspace --locked`.
-  3. **build** (needs tests), with `FFR_RELEASE_BUILD=1`:
-     - Windows: `cargo build --release --locked -p ffr-app` → `choco install innosetup -y --no-progress` (when `iscc` is missing) → `iscc /DAppVersion=X.Y.Z /DSourceExe=… installer\ffr.iss` → `FastFileRecovery-setup.exe`.
-     - Ubuntu 22.04: build → `strip` → `fast-file-recovery-linux-x64`.
-     - macOS 15 (arm64 runner): build `aarch64-apple-darwin` → `strip` → `codesign -s - --force` → `fast-file-recovery-macos-arm64`.
-     - Each uploads its one file as an artifact.
-  4. **release** (needs build): download the artifacts → `sha256sum * > SHA256SUMS.txt` → extract notes from that version's `CHANGELOG.md` section → create tag `vX.Y.Z` on the built commit → publish the GitHub release (title `Fast File Recovery vX.Y.Z`, 3 binaries + `SHA256SUMS.txt`, `prerelease` flag, `make_latest` when stable).
+1. **meta (Version):** read the version from `[workspace.package]`, check it matches every crate in `Cargo.lock`. `release=true` when the push is a tag matching the version, or a push to `main` and no GitHub release `vX.Y.Z` exists yet (nothing is published twice). Then the `CHANGELOG.md` section must exist. A hyphen → `prerelease=true`.
+2. **lint:** `cargo fmt --all --check` + `cargo clippy --workspace --all-targets --locked -- -D warnings`.
+3. **windows / linux / macos** (each tests, then builds its one file):
+   - Windows: `cargo test` → `cargo build --release --locked -p ffr-app` → Inno Setup (`choco install innosetup` when missing) → `FastFileRecovery-setup.exe`.
+   - Linux: GUI dev packages for tests, `cargo test` + the ignored round-trip test → `cargo zigbuild --release -p ffr-app --target x86_64-unknown-linux-gnu.2.28` (glibc 2.28+) → `fast-file-recovery-linux-x64`.
+   - macOS 15 (arm64): `cargo test` → build `aarch64-apple-darwin` → `codesign --force -s -` → `fast-file-recovery-macos-arm64`.
+4. **release** (needs all of the above, only when `release=true`): `SHA256SUMS.txt`, notes = that version's changelog section + a download table + checksums → tag `vX.Y.Z` on the built commit → GitHub release (title `Fast File Recovery vX.Y.Z`, 3 binaries + `SHA256SUMS.txt`, pre-release flag, latest when stable).
 
 Release profile: `opt-level = 3`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"` is **not** used (the engine relies on `catch_unwind` to release disk locks), `strip = true`. Windows uses `windows_subsystem = "windows"` in release (no console). `--version` still prints via `AttachConsole(ATTACH_PARENT_PROCESS)`.
 
@@ -409,29 +416,21 @@ Run these and report results honestly. Never claim a check passed without runnin
 
 ---
 
-## 15. README structure (mirror local-ai-ui)
+## 15. README structure (mirror akulav-mc-launcher)
 
-Centered logo + tagline ("Get deleted files back, fast. One program, nothing written to the disk you're saving.") → badges (Windows, Linux, macOS arm64, release, CI) → link row (Download · Quick start · Features · Building · Changelog) → sections in this order:
+Centered block: 128 px icon → title → bold tagline "… Made by Akulav." → one line (nothing written to your disk, no spyware, no telemetry, one file per system) → `for-the-badge` badges (release, downloads, build) → `flat-square` badges (Windows, Linux, macOS Apple Silicon, made with Rust, license source-available) → "⬇ Download the latest release". Then a rule and these sections, each with an emoji in the heading:
 
-1. Contents
-2. Why it's different (Never writes to your disk · Locks the disk · Uses every core · One file per OS · Keeps itself current)
-3. Features (table by area: Sources, Quick scan, Deep scan, Results & preview, Recovery, Disk images, Updates, Comfort)
-4. Quick start (4 steps: download, start, pick a disk, scan → recover to another disk) + a tip: **stop using the disk now**
-5. What you need (minimum vs comfortable: OS, CPU, RAM, a second disk)
-6. Installing, updating and uninstalling (per-OS table; updating, verified with SHA-256; what an update replaces vs never touches; uninstalling)
-7. Command line (`--version`, `--here`, `--uninstall [--delete-data]`)
-8. How it works (mermaid flowchart of the §5.4 pipeline; quick vs deep scan)
-9. Supported file types (table from §5.5)
-10. Settings (table by group)
-11. Safety and privacy (read-only by design, locking, destination check, no telemetry; network only for update checks)
-12. Building from source
-13. Versions and releases
-14. Tests
-15. Project layout
-16. Troubleshooting (access denied / needs admin, can't lock the system disk, macOS first open and Full Disk Access, slow USB, many bad sectors → make an image first)
-17. License
+1. ⬇️ Download (table: platform, direct `releases/latest/download/<asset>` link, notes; `SHA256SUMS.txt` line) + the **stop using the disk now** warning
+2. ✨ Features (2×2 HTML table of cards: Safe by design, Finds everything, Fast & light, Always up to date)
+3. 🚀 Getting started (Windows / Linux / macOS install steps with the folder choice, recovering files, the `portable.txt` tip)
+4. 📁 Where your data lives (everything in the install folder; table of entries; legacy data is moved in)
+5. 🖥️ Command line
+6. 📄 Supported file types
+7. 🧯 Troubleshooting
+8. Collapsed `<details>` "🛠️ For maintainers": how it works (mermaid), publishing a release, how updates are applied, building, tests, project layout
+9. 🙏 Credits
 
-Footer: **Made by Akulav**.
+Footer (centered): **Made with ❤️ by [Akulav]** and a `<sub>` line with © and the Akulav Source-Available License link.
 
 ---
 
@@ -445,7 +444,7 @@ Work through the milestones in order. Each milestone ends as a release (§10). T
 - [x] `installer/ffr.iss` (install, update mode, uninstall prompt) + `xtask installer-images`
 - [x] Linux/macOS self-install + `--here`/`--uninstall`/`--version`
 - [x] Updater + Check for updates / Update buttons + About screen
-- [x] `ci.yml`, `release.yml`, `run.bat`, `xtask bump|release|dist|check`, README skeleton, CHANGELOG
+- [x] `build.yml` (was `ci.yml` + `release.yml`), `run.bat`, `xtask bump|release|dist|check`, README skeleton, CHANGELOG
 
 **M1: Devices and deep scan**
 - [x] Device enumeration (3 OSes) + disk cards with partition bars + image files

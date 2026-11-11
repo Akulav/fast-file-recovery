@@ -1,11 +1,14 @@
-//! Linux self-install into `~/.local/share/fast-file-recovery` with a `~/.local/bin` symlink,
-//! a `.desktop` entry and hicolor icons.
+//! Linux: the binary installs itself into a folder the user picks (default
+//! `~/.local/share/fast-file-recovery`), with a `~/.local/bin` symlink, a `.desktop` entry and
+//! hicolor icons. Settings, saved scans and logs live in that same folder.
 
-use super::{is_newer, version_of, StartupOffer};
-use crate::branding::{APP_ID, APP_NAME, BIN_NAME, VERSION};
-use std::os::unix::fs::PermissionsExt;
+use super::unix::{copy_self_to, forget, offer_for, pointer_root, remember, swap_in};
+use super::{installed_root, is_install_root, program_root, same_path, StartupOffer};
+use crate::branding::{APP_ID, APP_NAME, BIN_NAME};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+pub use super::unix::on_installed_start;
 
 const ICONS: &[(u32, &[u8])] = &[
     (16, include_bytes!("../../../../assets/icons/icon-16.png")),
@@ -24,16 +27,18 @@ fn home() -> PathBuf {
 
 fn data_home() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME")
+        .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| home().join(".local/share"))
 }
 
-fn install_dir() -> PathBuf {
+/// Suggested install folder. Versions before 0.1.3 always installed here.
+pub fn default_install_dir() -> PathBuf {
     data_home().join(APP_ID)
 }
 
-fn installed_bin() -> PathBuf {
-    install_dir().join(BIN_NAME)
+fn installed_bin(root: &Path) -> PathBuf {
+    root.join(BIN_NAME)
 }
 
 fn symlink_path() -> PathBuf {
@@ -46,35 +51,31 @@ fn desktop_path() -> PathBuf {
         .join(format!("{APP_ID}.desktop"))
 }
 
-fn running_installed() -> bool {
-    let me = std::env::current_exe().and_then(std::fs::canonicalize).ok();
-    let inst = std::fs::canonicalize(installed_bin()).ok();
-    me.is_some() && me == inst
+/// The remembered folder, or the pre-0.1.3 install (always in the default folder).
+pub fn remembered_root() -> Option<PathBuf> {
+    pointer_root().or_else(|| {
+        let d = default_install_dir();
+        installed_bin(&d).is_file().then_some(d)
+    })
+}
+
+/// A pre-0.1.3 install updated itself in place: adopt its folder as the install folder.
+pub fn before_run() -> bool {
+    let Some(root) = program_root() else {
+        return false;
+    };
+    if !is_install_root(&root) && same_path(&root, &default_install_dir()) {
+        let bin = installed_bin(&root);
+        if bin.is_file() && super::write_marker(&root).is_ok() {
+            remember(&root);
+            let _ = write_desktop_and_icons(&bin);
+        }
+    }
+    false
 }
 
 pub fn startup_offer() -> StartupOffer {
-    if running_installed() {
-        return StartupOffer::None;
-    }
-    let bin = installed_bin();
-    if !bin.exists() {
-        return StartupOffer::Install;
-    }
-    let installed = version_of(&bin);
-    if is_newer(VERSION, installed.as_deref()) {
-        StartupOffer::UpdateInstalled { installed }
-    } else {
-        StartupOffer::None
-    }
-}
-
-fn copy_self_to(dest: &Path) -> Result<(), String> {
-    let me = std::env::current_exe().map_err(|e| e.to_string())?;
-    let tmp = dest.with_extension("new");
-    std::fs::copy(&me, &tmp).map_err(|e| format!("Couldn't copy the program: {e}"))?;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
-        .map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, dest).map_err(|e| e.to_string())
+    offer_for(remembered_root(), installed_bin, default_install_dir())
 }
 
 /// Quote a path for a `.desktop` `Exec=` key (Desktop Entry spec: quoted argument rules,
@@ -119,10 +120,11 @@ fn write_desktop_and_icons(bin: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn install_and_relaunch() -> Result<(), String> {
-    let dir = install_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let bin = installed_bin();
+/// Copy this binary into `root`, mark and remember the folder, add menu entries, start it.
+pub fn install_and_relaunch(root: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(root)
+        .map_err(|e| format!("Couldn't create {}: {e}", root.display()))?;
+    let bin = installed_bin(root);
     copy_self_to(&bin)?;
     let link = symlink_path();
     if let Some(d) = link.parent() {
@@ -131,13 +133,19 @@ pub fn install_and_relaunch() -> Result<(), String> {
     let _ = std::fs::remove_file(&link);
     let _ = std::os::unix::fs::symlink(&bin, &link);
     write_desktop_and_icons(&bin)?;
+    super::write_marker(root).map_err(|e| e.to_string())?;
+    remember(root);
     Command::new(&bin)
+        .current_dir(root)
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("Installed, but couldn't start it: {e}"))
 }
 
 pub fn uninstall(delete_data: bool) -> Result<String, String> {
+    let Some(root) = installed_root() else {
+        return Ok("Nothing to remove; Fast File Recovery is not installed.".into());
+    };
     let mut removed = Vec::new();
     for p in [symlink_path(), desktop_path()] {
         if std::fs::remove_file(&p).is_ok() {
@@ -151,53 +159,54 @@ pub fn uninstall(delete_data: bool) -> Result<String, String> {
                 .join(format!("{size}x{size}/apps/{APP_ID}.png")),
         );
     }
-    if std::fs::remove_dir_all(install_dir()).is_ok() {
-        removed.push(install_dir().display().to_string());
+    // A running binary can be deleted on Linux; the process keeps its copy until it exits.
+    let bin = installed_bin(&root);
+    for p in [
+        bin.clone(),
+        bin.with_extension("old"),
+        bin.with_extension("new"),
+    ] {
+        let _ = std::fs::remove_file(p);
     }
+    let _ = std::fs::remove_file(root.join(super::MARKER));
+    removed.push(bin.display().to_string());
+    forget();
     if delete_data {
-        for d in [crate::paths::config_dir(), crate::paths::logs_dir()] {
-            if std::fs::remove_dir_all(&d).is_ok() {
-                removed.push(d.display().to_string());
-            }
+        super::delete_data(&root);
+        for d in [
+            crate::paths::legacy_config_dir(),
+            crate::paths::legacy_logs_dir(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let _ = std::fs::remove_dir_all(d);
         }
+        removed.push(format!(
+            "settings, saved scans and logs in {}",
+            root.display()
+        ));
     }
-    if removed.is_empty() {
-        Ok("Nothing to remove; Fast File Recovery is not installed.".into())
-    } else {
-        Ok(format!("Removed:\n  {}", removed.join("\n  ")))
-    }
+    let _ = std::fs::remove_dir(&root);
+    Ok(format!("Removed:\n  {}", removed.join("\n  ")))
 }
 
-/// Swap the binary atomically (same filesystem), relaunch.
+/// Swap the running binary for the verified download (same folder, atomic rename), relaunch.
 pub fn apply_update(new: &Path) -> Result<(), String> {
-    let target = if installed_bin().exists() {
-        installed_bin()
-    } else {
-        std::env::current_exe().map_err(|e| e.to_string())?
-    };
-    let staged = target.with_extension("new");
-    std::fs::copy(new, &staged).map_err(|e| format!("Couldn't stage the update: {e}"))?;
-    std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))
-        .map_err(|e| e.to_string())?;
-    let old = target.with_extension("old");
-    let _ = std::fs::remove_file(&old);
-    std::fs::rename(&target, &old).map_err(|e| e.to_string())?;
-    if let Err(e) = std::fs::rename(&staged, &target) {
-        let _ = std::fs::rename(&old, &target);
-        return Err(e.to_string());
-    }
+    let target = std::env::current_exe().map_err(|e| e.to_string())?;
+    swap_in(new, &target)?;
     Command::new(&target)
         .arg("--here")
         .spawn()
         .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| format!("Updated, but couldn't restart: {e}"))
 }
 
 pub fn cleanup_old() {
     if let Ok(me) = std::env::current_exe() {
         let _ = std::fs::remove_file(me.with_extension("old"));
+        let _ = std::fs::remove_file(me.with_extension("new"));
     }
-    let _ = std::fs::remove_file(installed_bin().with_extension("old"));
 }
 
 #[cfg(test)]
