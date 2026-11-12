@@ -245,16 +245,16 @@ Events are batched by the engine to at most 10 per second. The GUI drains the ch
 ### 6.1 Design system (`theme.rs`)
 
 - **Themes:** Dark (default) and Light, plus "Follow system". All colors come from one `Palette` struct, and there are **no raw `Color32` literals outside `theme.rs`**.
-- **Dark palette:** background `#0F1115`, surface `#171A21`, raised `#1E222B`, border `#2A2F3A`, text `#E6E8EE`, muted `#8A91A0`, accent `#4F8CFF` (hover `#6A9EFF`), success `#3FB950`, warning `#D29922`, danger `#F85149`. Category colors: Images `#4F8CFF`, Video `#B47CFF`, Audio `#2BC4A9`, Documents `#F2A93B`, Archives `#E86E5A`, Other `#8A91A0`.
+- **Dark palette** (the look of Akulav's Hyve and Lumen): background `#090B14` painted with soft accent / teal / violet glows (`paint_backdrop`), glass panels and cards (`Palette::glass`, translucent white with a hairline `glass_border`), surface `#10131F`, raised `#171B2A`, border `#2A2F45`, text `#E8EAF6`, muted `#8F95B2`, accent `#4F8CFF` (hover `#6A9EFF`), success `#34D399`, warning `#FBBF24`, danger `#F87171`. Category colors: Images `#4F8CFF`, Video `#B47CFF`, Audio `#2BC4A9`, Documents `#F2A93B`, Archives `#E86E5A`, Other `#8A91A0`.
 - **Light palette:** the same hues adjusted for contrast ≥ 4.5:1 on `#F7F8FA`.
 - **Type:** Inter 13 px body, 12 px small, 15 px section titles, 22 px screen titles (semibold). JetBrains Mono for offsets, sizes, hex and throughput.
-- **Shape and space:** 8 px spacing grid, 10 px corner radius on cards, 6 px on controls, 1 px borders, soft shadow on raised cards only.
+- **Shape and space:** 8 px spacing grid, 14 px corner radius on cards, 8 px on controls, 1 px borders, soft shadow on raised cards only. The sidebar is a floating glass panel 14 px from the window edges; the current page's nav item is an accent gradient pill with an accent border (`paint_active_pill`). The window uses the system title bar.
 - **Motion:** 150 ms ease-out on hover/selection (`ctx.animate_bool_with_time`), smooth progress values (lerp), no motion while the user scrolls a table.
 - **DPI:** honors OS scale. The layout works from a 960×640 minimum window up to 4K.
 
 ### 6.2 Shell
 
-- **Left sidebar (220 px):** app icon + name, a step flow `1 Source → 2 Scan → 3 Results → 4 Recover` (completed steps get a check mark; later steps are disabled until reachable), then Settings and About. The **footer** shows `Made by Akulav · v0.1.0`, plus an **update pill** ("Update to vX.Y.Z") when an update is available.
+- **Left sidebar (250 px including its gap):** app icon + name, a step flow `1 Source → 2 Scan → 3 Results → 4 Recover` (completed steps get a check mark; later steps are disabled until reachable), then Settings and About. The **footer** shows `Made by Akulav · v0.1.0`, plus an **update pill** ("Update to vX.Y.Z") when an update is available.
 - **Top bar per screen:** title, one-line context (e.g. "Samsung SSD 980 · 1 TB · locked 🔒") and that screen's main action button on the right.
 - **Toasts:** bottom right, auto-hide 4 s; errors stay until closed.
 - **Window:** remembers size and position; title "Fast File Recovery". The app id is `fast-file-recovery` (it matches the `.desktop` file so Wayland shows the icon).

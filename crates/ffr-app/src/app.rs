@@ -945,151 +945,163 @@ impl FfrApp {
 
     fn sidebar(&mut self, ctx: &egui::Context) {
         let p = self.p;
+        // A floating glass panel, like Hyve's sidebar.
         egui::SidePanel::left("sidebar")
             .exact_width(theme::SIDEBAR_WIDTH)
             .resizable(false)
-            .frame(
-                Frame::new()
-                    .fill(p.surface)
-                    .stroke(Stroke::new(1.0_f32, p.border))
-                    .inner_margin(Margin::same(14)),
-            )
+            .show_separator_line(false)
+            .frame(Frame::new())
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.add(
-                        egui::Image::from_bytes("bytes://ffr-icon-256.png", branding::ICON_256)
-                            .fit_to_exact_size(Vec2::splat(34.0)),
-                    );
-                    ui.vertical(|ui| {
-                        ui.add_space(1.0);
-                        ui.label(
-                            RichText::new("Fast File")
-                                .font(theme::semibold(14.0))
-                                .color(p.text),
-                        );
-                        ui.label(
-                            RichText::new("Recovery")
-                                .font(theme::semibold(14.0))
-                                .color(p.accent),
-                        );
-                    });
-                });
-                ui.add_space(16.0);
-                sidebar_divider(ui, &p);
-                ui.add_space(12.0);
-                sidebar_label(ui, &p, "RECOVERY");
-                ui.add_space(4.0);
-                let has_scan = self.scan.is_some() || self.session.is_some();
-                let has_hits = self.session.as_ref().is_some_and(|s| !s.hits.is_empty());
-                let steps = [
-                    (Screen::Source, "Source", Icon::HardDrive, true, has_scan),
-                    (
-                        Screen::Scan,
-                        "Scan",
-                        Icon::Scan,
-                        self.scan.is_some(),
-                        self.scan.as_ref().is_some_and(|s| s.done.is_some()),
-                    ),
-                    (
-                        Screen::Results,
-                        "Results",
-                        Icon::List,
-                        has_hits || self.scan.is_some(),
-                        self.results.sel_count > 0,
-                    ),
-                    (
-                        Screen::Recover,
-                        "Recover",
-                        Icon::Recover,
-                        self.results.sel_count > 0 || self.recover.summary.is_some(),
-                        self.recover.summary.is_some(),
-                    ),
-                ];
-                for (i, (screen, label, icon, reachable, done)) in steps.into_iter().enumerate() {
-                    if self.nav_item(
-                        ui,
-                        screen,
-                        &format!("{}", i + 1),
-                        label,
-                        icon,
-                        reachable,
-                        done,
-                    ) {
-                        self.screen = screen;
-                    }
-                    if i < 3 {
-                        let (r, _) = ui.allocate_exact_size(
-                            Vec2::new(ui.available_width(), 8.0),
-                            Sense::hover(),
-                        );
-                        // The connector turns green once the step above it is done.
-                        let line = if done {
-                            Palette::soft(p.success, 150)
-                        } else {
-                            p.border
-                        };
-                        ui.painter().line_segment(
-                            [
-                                egui::pos2(r.left() + 19.0, r.top() - 1.0),
-                                egui::pos2(r.left() + 19.0, r.bottom() + 1.0),
-                            ],
-                            Stroke::new(2.0_f32, line),
-                        );
-                    }
-                }
-                ui.add_space(16.0);
-                sidebar_divider(ui, &p);
-                ui.add_space(12.0);
-                sidebar_label(ui, &p, "APP");
-                ui.add_space(4.0);
-                if self.nav_item(
-                    ui,
-                    Screen::Settings,
-                    "",
-                    "Settings",
-                    Icon::Settings,
-                    true,
-                    false,
-                ) {
-                    self.screen = Screen::Settings;
-                }
-                if self.nav_item(ui, Screen::About, "", "About", Icon::Info, true, false) {
-                    self.screen = Screen::About;
-                }
-                ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+                let gap = theme::WINDOW_GAP;
+                let panel = egui::Rect::from_min_max(
+                    ui.max_rect().min + Vec2::splat(gap),
+                    ui.max_rect().max - Vec2::new(0.0, gap),
+                );
+                ui.painter().rect(
+                    panel,
+                    CornerRadius::same(theme::CARD_RADIUS + 2),
+                    p.glass(),
+                    Stroke::new(1.0_f32, p.glass_border()),
+                    egui::StrokeKind::Inside,
+                );
+                ui.scope_builder(egui::UiBuilder::new().max_rect(panel.shrink(12.0)), |ui| {
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        ui.label(widgets::small_muted(&p, MADE_BY));
-                        ui.label(
-                            RichText::new(format!("v{VERSION}"))
-                                .font(theme::mono(11.0))
-                                .color(p.muted),
+                        ui.add(
+                            egui::Image::from_bytes("bytes://ffr-icon-256.png", branding::ICON_256)
+                                .fit_to_exact_size(Vec2::splat(34.0)),
                         );
+                        ui.vertical(|ui| {
+                            ui.add_space(1.0);
+                            ui.label(
+                                RichText::new("Fast File")
+                                    .font(theme::semibold(14.0))
+                                    .color(p.text),
+                            );
+                            ui.label(
+                                RichText::new("Recovery")
+                                    .font(theme::semibold(14.0))
+                                    .color(p.accent),
+                            );
+                        });
                     });
-                    ui.add_space(6.0);
+                    ui.add_space(16.0);
                     sidebar_divider(ui, &p);
+                    ui.add_space(12.0);
+                    sidebar_label(ui, &p, "RECOVERY");
                     ui.add_space(4.0);
-                    if let Some(r) = self.updater.available().cloned() {
-                        ui.add_space(4.0);
-                        let text = format!("Update to v{}", r.version);
-                        let resp = Frame::new()
-                            .fill(Palette::soft(p.accent, 40))
-                            .stroke(Stroke::new(1.0_f32, p.accent))
-                            .corner_radius(CornerRadius::same(12))
-                            .inner_margin(Margin::symmetric(10, 4))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    widgets::icons::icon(ui, Icon::Download, 14.0, p.accent);
-                                    ui.label(RichText::new(text).color(p.accent).size(12.0));
-                                });
-                            })
-                            .response
-                            .interact(Sense::click())
-                            .on_hover_cursor(egui::CursorIcon::PointingHand);
-                        if resp.clicked() {
-                            self.screen = Screen::About;
+                    let has_scan = self.scan.is_some() || self.session.is_some();
+                    let has_hits = self.session.as_ref().is_some_and(|s| !s.hits.is_empty());
+                    let steps = [
+                        (Screen::Source, "Source", Icon::HardDrive, true, has_scan),
+                        (
+                            Screen::Scan,
+                            "Scan",
+                            Icon::Scan,
+                            self.scan.is_some(),
+                            self.scan.as_ref().is_some_and(|s| s.done.is_some()),
+                        ),
+                        (
+                            Screen::Results,
+                            "Results",
+                            Icon::List,
+                            has_hits || self.scan.is_some(),
+                            self.results.sel_count > 0,
+                        ),
+                        (
+                            Screen::Recover,
+                            "Recover",
+                            Icon::Recover,
+                            self.results.sel_count > 0 || self.recover.summary.is_some(),
+                            self.recover.summary.is_some(),
+                        ),
+                    ];
+                    for (i, (screen, label, icon, reachable, done)) in steps.into_iter().enumerate()
+                    {
+                        if self.nav_item(
+                            ui,
+                            screen,
+                            &format!("{}", i + 1),
+                            label,
+                            icon,
+                            reachable,
+                            done,
+                        ) {
+                            self.screen = screen;
+                        }
+                        if i < 3 {
+                            let (r, _) = ui.allocate_exact_size(
+                                Vec2::new(ui.available_width(), 8.0),
+                                Sense::hover(),
+                            );
+                            // The connector turns green once the step above it is done.
+                            let line = if done {
+                                Palette::soft(p.success, 150)
+                            } else {
+                                p.border
+                            };
+                            ui.painter().line_segment(
+                                [
+                                    egui::pos2(r.left() + 19.0, r.top() - 1.0),
+                                    egui::pos2(r.left() + 19.0, r.bottom() + 1.0),
+                                ],
+                                Stroke::new(2.0_f32, line),
+                            );
                         }
                     }
+                    ui.add_space(16.0);
+                    sidebar_divider(ui, &p);
+                    ui.add_space(12.0);
+                    sidebar_label(ui, &p, "APP");
+                    ui.add_space(4.0);
+                    if self.nav_item(
+                        ui,
+                        Screen::Settings,
+                        "",
+                        "Settings",
+                        Icon::Settings,
+                        true,
+                        false,
+                    ) {
+                        self.screen = Screen::Settings;
+                    }
+                    if self.nav_item(ui, Screen::About, "", "About", Icon::Info, true, false) {
+                        self.screen = Screen::About;
+                    }
+                    ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            ui.label(widgets::small_muted(&p, MADE_BY));
+                            ui.label(
+                                RichText::new(format!("v{VERSION}"))
+                                    .font(theme::mono(11.0))
+                                    .color(p.muted),
+                            );
+                        });
+                        ui.add_space(6.0);
+                        sidebar_divider(ui, &p);
+                        ui.add_space(4.0);
+                        if let Some(r) = self.updater.available().cloned() {
+                            ui.add_space(4.0);
+                            let text = format!("Update to v{}", r.version);
+                            let resp = Frame::new()
+                                .fill(Palette::soft(p.accent, 40))
+                                .stroke(Stroke::new(1.0_f32, p.accent))
+                                .corner_radius(CornerRadius::same(12))
+                                .inner_margin(Margin::symmetric(10, 4))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        widgets::icons::icon(ui, Icon::Download, 14.0, p.accent);
+                                        ui.label(RichText::new(text).color(p.accent).size(12.0));
+                                    });
+                                })
+                                .response
+                                .interact(Sense::click())
+                                .on_hover_cursor(egui::CursorIcon::PointingHand);
+                            if resp.clicked() {
+                                self.screen = Screen::About;
+                            }
+                        }
+                    });
                 });
             });
     }
@@ -1121,18 +1133,14 @@ impl FfrApp {
         let a = ui
             .ctx()
             .animate_bool_with_time(resp.id.with("a"), active, theme::ANIM);
-        let fill = Palette::mix(
-            Palette::mix(p.surface, p.hover_fill(), h),
-            Palette::soft(p.accent, 50),
-            a,
+        // Hyve's nav item: a faint hover, and for the current page an accent gradient with an accent border.
+        ui.painter().rect_filled(
+            rect,
+            CornerRadius::same(theme::CONTROL_RADIUS + 2),
+            Palette::soft(p.text, (h * (1.0 - a) * 14.0) as u8),
         );
-        ui.painter()
-            .rect_filled(rect, CornerRadius::same(theme::CONTROL_RADIUS + 2), fill);
         if a > 0.0 {
-            let bar =
-                egui::Rect::from_min_size(rect.min + Vec2::new(0.0, 9.0), Vec2::new(3.0 * a, 20.0));
-            ui.painter()
-                .rect_filled(bar, CornerRadius::same(2), p.accent);
+            theme::paint_active_pill(ui.painter(), rect, p, a);
         }
         let fg = if !reachable {
             Palette::mix(p.muted, p.surface, 0.45)
@@ -1545,14 +1553,16 @@ impl eframe::App for FfrApp {
         self.keyboard(ctx);
         self.remember_window(ctx);
 
-        self.sidebar(ctx);
         let p = self.p;
+        theme::paint_backdrop(ctx, &p);
+        self.sidebar(ctx);
         egui::CentralPanel::default()
-            .frame(
-                Frame::new()
-                    .fill(p.bg)
-                    .inner_margin(Margin::symmetric(24, 20)),
-            )
+            .frame(Frame::new().inner_margin(Margin {
+                left: 26,
+                right: 26,
+                top: 22,
+                bottom: 18,
+            }))
             .show(ctx, |ui| match self.screen {
                 Screen::Source => screens::source::ui(self, ui),
                 Screen::Scan => screens::scan::ui(self, ui),

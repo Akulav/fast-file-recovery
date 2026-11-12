@@ -1,18 +1,27 @@
 //! Design system: palette, fonts, egui style and spacing tokens.
 //! All colours live here; there are no raw `Color32` literals elsewhere.
+//!
+//! The dark theme follows Akulav's newer apps (Hyve, Lumen): a deep blue-black backdrop with soft glows
+//! ([`paint_backdrop`]), glass panels with hairline borders ([`Palette::glass`]) and a gradient pill for the
+//! current page ([`paint_active_pill`]).
 
 use eframe::egui::{
-    self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Margin, Shadow,
-    Stroke, TextStyle, Visuals,
+    self,
+    epaint::{Mesh, Vertex, WHITE_UV},
+    Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Margin, Pos2, Rect,
+    Shadow, Stroke, TextStyle, Visuals,
 };
 use ffr_core::kinds::Category;
 use std::sync::Arc;
 
 /// Spacing grid and shapes.
 pub const SPACE: f32 = 8.0;
-pub const CARD_RADIUS: u8 = 10;
-pub const CONTROL_RADIUS: u8 = 6;
-pub const SIDEBAR_WIDTH: f32 = 220.0;
+pub const CARD_RADIUS: u8 = 14;
+pub const CONTROL_RADIUS: u8 = 8;
+/// Sidebar panel width, including the gap around the floating glass panel.
+pub const SIDEBAR_WIDTH: f32 = 250.0;
+/// Gap between the window edge, the sidebar panel and the content.
+pub const WINDOW_GAP: f32 = 14.0;
 pub const ANIM: f32 = 0.15;
 
 pub const SEMIBOLD: &str = "semibold";
@@ -74,6 +83,22 @@ impl Palette {
             color: self.shadow,
         }
     }
+    /// Panel and card fill: translucent white over the dark backdrop (glass), plain surface in the light theme.
+    pub fn glass(&self) -> Color32 {
+        if self.dark {
+            Color32::from_rgba_premultiplied(14, 14, 15, 14)
+        } else {
+            self.surface
+        }
+    }
+    /// Hairline border of glass panels and cards.
+    pub fn glass_border(&self) -> Color32 {
+        if self.dark {
+            Color32::from_rgba_premultiplied(24, 24, 26, 24)
+        } else {
+            self.border
+        }
+    }
     /// Very light shadow for resting cards (barely visible, adds depth).
     pub fn rest_shadow(&self) -> Shadow {
         Shadow {
@@ -93,18 +118,18 @@ impl Palette {
     pub fn dark() -> Self {
         Self {
             dark: true,
-            bg: hex(0x0F1115),
-            surface: hex(0x171A21),
-            raised: hex(0x1E222B),
-            border: hex(0x2A2F3A),
-            text: hex(0xE6E8EE),
-            muted: hex(0x8A91A0),
+            bg: hex(0x090B14),
+            surface: hex(0x10131F),
+            raised: hex(0x171B2A),
+            border: hex(0x2A2F45),
+            text: hex(0xE8EAF6),
+            muted: hex(0x8F95B2),
             accent: hex(0x4F8CFF),
             accent_hover: hex(0x6A9EFF),
             on_accent: hex(0xFFFFFF),
-            success: hex(0x3FB950),
-            warning: hex(0xD29922),
-            danger: hex(0xF85149),
+            success: hex(0x34D399),
+            warning: hex(0xFBBF24),
+            danger: hex(0xF87171),
             images: hex(0x4F8CFF),
             video: hex(0xB47CFF),
             audio: hex(0x2BC4A9),
@@ -112,7 +137,7 @@ impl Palette {
             archives: hex(0xE86E5A),
             other: hex(0x8A91A0),
             shadow: Color32::from_black_alpha(90),
-            map_unread: hex(0x232833),
+            map_unread: hex(0x1C2132),
         }
     }
 
@@ -196,6 +221,120 @@ impl Palette {
         let (x, y) = (lum(a), lum(b));
         (x.max(y) + 0.05) / (x.min(y) + 0.05)
     }
+}
+
+/// Soft radial glow: `color` in the middle, fading to nothing at `radius`.
+fn radial(mesh: &mut Mesh, center: Pos2, radius: egui::Vec2, color: Color32) {
+    let base = mesh.vertices.len() as u32;
+    mesh.vertices.push(Vertex {
+        pos: center,
+        uv: WHITE_UV,
+        color,
+    });
+    let n = 48;
+    for i in 0..=n {
+        let a = i as f32 / n as f32 * std::f32::consts::TAU;
+        let pos = center + egui::vec2(a.cos() * radius.x, a.sin() * radius.y);
+        mesh.vertices.push(Vertex {
+            pos,
+            uv: WHITE_UV,
+            color: Color32::TRANSPARENT,
+        });
+    }
+    for i in 0..n {
+        mesh.add_triangle(base, base + 1 + i, base + 2 + i);
+    }
+}
+
+/// The window backdrop: the base colour with an accent glow top-left, a teal glow top-right and a violet one below.
+pub fn paint_backdrop(ctx: &egui::Context, p: &Palette) {
+    let r: Rect = ctx.screen_rect();
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    painter.rect_filled(r, CornerRadius::ZERO, p.bg);
+    let k = if p.dark { 1.0 } else { 0.35 };
+    let (w, h) = (r.width(), r.height());
+    let mut mesh = Mesh::default();
+    radial(
+        &mut mesh,
+        r.min + egui::vec2(w * 0.08, -h * 0.10),
+        egui::vec2(w * 0.62, h * 0.85),
+        p.accent.gamma_multiply(0.16 * k),
+    );
+    radial(
+        &mut mesh,
+        r.min + egui::vec2(w * 1.05, h * 0.10),
+        egui::vec2(w * 0.48, h * 0.75),
+        p.audio.gamma_multiply(0.10 * k),
+    );
+    radial(
+        &mut mesh,
+        r.min + egui::vec2(w * 0.5, h * 1.2),
+        egui::vec2(w * 0.45, h * 0.6),
+        p.video.gamma_multiply(0.08 * k),
+    );
+    painter.add(mesh);
+}
+
+/// The current page's nav item: an accent gradient fading to the right with an accent border (Hyve's nav).
+/// `a` fades it in (0..=1).
+pub fn paint_active_pill(painter: &egui::Painter, rect: Rect, p: &Palette, a: f32) {
+    let radius = CONTROL_RADIUS + 2;
+    let r = radius as f32;
+    let left = Palette::soft(p.accent, (72.0 * a) as u8);
+    let right = Palette::soft(p.accent, (20.0 * a) as u8);
+    // Caps clipped to their own strips so the translucent colours never overlap.
+    let lstrip = Rect::from_min_max(rect.min, egui::pos2(rect.min.x + r, rect.max.y));
+    let rstrip = Rect::from_min_max(egui::pos2(rect.max.x - r, rect.min.y), rect.max);
+    painter
+        .with_clip_rect(lstrip.intersect(painter.clip_rect()))
+        .rect_filled(
+            Rect::from_min_max(rect.min, egui::pos2(rect.min.x + 2.0 * r, rect.max.y)),
+            CornerRadius {
+                nw: radius,
+                sw: radius,
+                ne: 0,
+                se: 0,
+            },
+            left,
+        );
+    painter
+        .with_clip_rect(rstrip.intersect(painter.clip_rect()))
+        .rect_filled(
+            Rect::from_min_max(egui::pos2(rect.max.x - 2.0 * r, rect.min.y), rect.max),
+            CornerRadius {
+                nw: 0,
+                sw: 0,
+                ne: radius,
+                se: radius,
+            },
+            right,
+        );
+    let mid = Rect::from_min_max(
+        egui::pos2(rect.min.x + r, rect.min.y),
+        egui::pos2(rect.max.x - r, rect.max.y),
+    );
+    let mut mesh = Mesh::default();
+    for (pos, c) in [
+        (mid.left_top(), left),
+        (mid.right_top(), right),
+        (mid.right_bottom(), right),
+        (mid.left_bottom(), left),
+    ] {
+        mesh.vertices.push(Vertex {
+            pos,
+            uv: WHITE_UV,
+            color: c,
+        });
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    painter.add(mesh);
+    painter.rect_stroke(
+        rect,
+        CornerRadius::same(radius),
+        Stroke::new(1.0_f32, Palette::soft(p.accent, (90.0 * a) as u8)),
+        egui::StrokeKind::Inside,
+    );
 }
 
 pub fn fonts() -> FontDefinitions {

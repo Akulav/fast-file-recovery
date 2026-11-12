@@ -4,6 +4,11 @@ All notable changes to Fast File Recovery are documented here. The format follow
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-12
+
+### Changed
+- **New look**, in the style of Akulav's Hyve and Lumen: a deep blue-black background with soft glows, the sidebar as a floating glass panel with the app name at the top, glass cards, the current page highlighted with a gradient, softer translucent buttons and a clear accent ring around the focused text field.
+
 ## [0.1.3] - 2026-11-12
 
 ### Changed

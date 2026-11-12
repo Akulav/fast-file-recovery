@@ -16,11 +16,11 @@ use eframe::egui::{
 };
 use icons::Icon;
 
-/// A surface card with a hairline border and a barely-there resting shadow.
+/// A glass card with a hairline border and a barely-there resting shadow.
 pub fn card(p: &Palette) -> Frame {
     Frame::new()
-        .fill(p.surface)
-        .stroke(Stroke::new(1.0_f32, p.border))
+        .fill(p.glass())
+        .stroke(Stroke::new(1.0_f32, p.glass_border()))
         .corner_radius(CornerRadius::same(CARD_RADIUS))
         .inner_margin(Margin::same(18))
         .shadow(p.rest_shadow())
