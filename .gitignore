@@ -2,3 +2,5 @@
 /dist
 *.ffrscan
 *.ffrscan.tmp
+# graphify knowledge graph (local, rebuilt with `graphify update .`)
+graphify-out/
