@@ -258,6 +258,12 @@ installer/        Inno Setup script and wizard images
 
 </details>
 
+## 📚 Documentation
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how it works inside and where each piece of the code lives
+- [CHANGELOG.md](CHANGELOG.md): what changed in each version
+- [CLAUDE.md](CLAUDE.md): notes and rules for working on the code
+
 ## 🙏 Credits
 
 UI icons following [Lucide](https://lucide.dev) (ISC). Inter and JetBrains Mono fonts (SIL OFL 1.1, see `assets/fonts`).

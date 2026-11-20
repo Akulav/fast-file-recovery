@@ -4,6 +4,11 @@ All notable changes to Fast File Recovery are documented here. The format follow
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-20
+
+### Changed
+- Docs: a new `docs/ARCHITECTURE.md` (the engine, both scan kinds, carving and recovery), linked from the README.
+
 ## [0.2.0] - 2026-11-12
 
 ### Changed
