@@ -4,6 +4,23 @@ All notable changes to Fast File Recovery are documented here. The format follow
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-21
+
+### Changed
+- **New look:** Windows 11's style, in dark and light, like Akulav's other apps: a flat window background, card layers
+  with hairline borders, the Windows accent blue (black text on it in the dark theme), 4 px controls and 8 px cards,
+  the navigation pane flat with an accent pill on the current step, and Segoe UI on Windows (Inter elsewhere). No more
+  glows, gradients or glass.
+
+### Security
+- A saved scan's disk is checked more strictly before it is read again: its id, path and kind must still belong
+  together and its fingerprint must match, and a saved scan of an image must point to a real image file, never a disk.
+
+### Removed
+- Moving settings, saved scans and logs from versions before 0.1.3 (`%APPDATA%\FastFileRecovery`,
+  `~/.config/fast-file-recovery`, …) into the install folder, and resuming saved scans made before fingerprints
+  existed. Update to 0.2.1 first if you still have that data.
+
 ## [0.2.1] - 2026-11-20
 
 ### Changed

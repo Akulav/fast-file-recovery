@@ -94,18 +94,6 @@ fn button_inner(
         }
         let painter = ui.painter();
         let radius = CornerRadius::same(CONTROL_RADIUS);
-        if primary && enabled {
-            // Soft coloured glow that grows on hover.
-            painter.add(
-                egui::epaint::Shadow {
-                    offset: [0, 2],
-                    blur: (6.0 + 8.0 * t) as u8,
-                    spread: 0,
-                    color: Palette::soft(base, (40.0 + 50.0 * t) as u8),
-                }
-                .as_shape(rect, radius),
-            );
-        }
         painter.rect(
             rect,
             radius,
@@ -113,14 +101,6 @@ fn button_inner(
             Stroke::new(1.0_f32, stroke),
             egui::StrokeKind::Inside,
         );
-        if primary && enabled {
-            // Thin top highlight gives the fill a little depth.
-            let top = egui::Rect::from_min_max(
-                rect.min + Vec2::new(2.0, 1.0),
-                egui::pos2(rect.right() - 2.0, rect.top() + 1.5),
-            );
-            painter.rect_filled(top, 0, Palette::soft(Palette::white(), 46));
-        }
         let mut x = rect.left() + 15.0;
         if let Some(ic) = icon {
             let r = egui::Rect::from_center_size(

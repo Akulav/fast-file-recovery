@@ -49,39 +49,21 @@ pub fn update_dir() -> PathBuf {
     data_dir().join("update")
 }
 
-/// Where versions before 0.1.3 kept settings and sessions (moved into the install folder on the
-/// first start of an installed copy).
-pub fn legacy_config_dir() -> Option<PathBuf> {
-    let dir = if cfg!(windows) {
-        std::env::var_os("APPDATA")
-            .map(PathBuf::from)
-            .or_else(|| user_home().map(|h| h.join("AppData/Roaming")))?
-            .join("FastFileRecovery")
-    } else if cfg!(target_os = "macos") {
-        user_home()?.join("Library/Application Support/FastFileRecovery")
-    } else {
-        xdg("XDG_CONFIG_HOME", ".config")?.join("fast-file-recovery")
-    };
-    Some(dir)
-}
-
-/// An XDG base folder (`$XDG_…` unless elevated, else `~/<fallback>`).
-fn xdg(var: &str, fallback: &str) -> Option<PathBuf> {
+/// Linux/macOS: folder for the one-line `install-dir` pointer, the only file kept outside the
+/// install folder (so a newer download can find and update the installed copy).
+#[cfg(unix)]
+pub fn pointer_dir() -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        return Some(user_home()?.join("Library/Application Support/FastFileRecovery"));
+    }
+    // `$XDG_CONFIG_HOME` unless elevated (root's environment is not the user's).
     let from_env = if crate::elevate::original_user_home().is_some() {
         None
     } else {
-        std::env::var_os(var)
+        std::env::var_os("XDG_CONFIG_HOME")
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
     };
-    from_env.or_else(|| user_home().map(|h| h.join(fallback)))
-}
-
-/// Where versions before 0.1.3 kept logs on Linux (Windows/macOS kept them in the config folder).
-pub fn legacy_logs_dir() -> Option<PathBuf> {
-    if cfg!(target_os = "linux") {
-        xdg("XDG_STATE_HOME", ".local/state").map(|d| d.join("fast-file-recovery"))
-    } else {
-        legacy_config_dir().map(|d| d.join("logs"))
-    }
+    let base = from_env.or_else(|| user_home().map(|h| h.join(".config")))?;
+    Some(base.join("fast-file-recovery"))
 }

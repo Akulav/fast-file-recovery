@@ -11,8 +11,7 @@
 //!
 //! **Files go there.** The install folder holds the program *and* everything the app writes
 //! (settings, saved scans, logs, downloaded updates). A [`MARKER`] file identifies an install
-//! folder. Data left in the pre-0.1.3 locations (`%APPDATA%\FastFileRecovery`,
-//! `~/.config/fast-file-recovery`, …) is moved in on the first start of the installed copy.
+//! folder.
 
 use std::path::{Path, PathBuf};
 
@@ -33,9 +32,6 @@ mod imp {
     use std::path::{Path, PathBuf};
     pub fn remembered_root() -> Option<PathBuf> {
         None
-    }
-    pub fn before_run() -> bool {
-        false
     }
     pub fn on_installed_start(_root: &Path) {}
     pub fn startup_offer() -> super::StartupOffer {
@@ -158,89 +154,12 @@ pub fn parse_install_dir(text: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-// ---------------------------------------------------------------------------------------------
-// Moving old data into the install folder
-// ---------------------------------------------------------------------------------------------
-
 fn remove_any(p: &Path) -> std::io::Result<()> {
     if p.is_dir() {
         std::fs::remove_dir_all(p)
     } else {
         std::fs::remove_file(p)
     }
-}
-
-/// Copy a file or a whole folder tree.
-fn copy_all(src: &Path, dst: &Path) -> std::io::Result<()> {
-    if src.is_dir() {
-        std::fs::create_dir_all(dst)?;
-        for entry in std::fs::read_dir(src)? {
-            let entry = entry?;
-            copy_all(&entry.path(), &dst.join(entry.file_name()))?;
-        }
-        Ok(())
-    } else {
-        std::fs::copy(src, dst).map(|_| ())
-    }
-}
-
-/// Move one file or folder. A rename is instant; across drives (e.g. `C:` → `D:`) it is copied
-/// and the original deleted. A failed copy leaves the original untouched.
-fn move_entry(src: &Path, dst: &Path) -> std::io::Result<()> {
-    if std::fs::rename(src, dst).is_ok() {
-        return Ok(());
-    }
-    if let Err(e) = copy_all(src, dst) {
-        let _ = remove_any(dst);
-        return Err(e);
-    }
-    let _ = remove_any(src);
-    Ok(())
-}
-
-/// Move [`DATA_ENTRIES`] from `from` to `to`. If anything fails, everything moved so far goes
-/// back. Entries already present in `to` are left. Returns how many entries moved.
-fn move_data(from: &Path, to: &Path) -> Result<usize, String> {
-    std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
-    let mut moved: Vec<&str> = Vec::new();
-    for name in DATA_ENTRIES {
-        let (src, dst) = (from.join(name), to.join(name));
-        if !src.exists() || dst.exists() {
-            continue;
-        }
-        if let Err(e) = move_entry(&src, &dst) {
-            for n in moved.iter().rev() {
-                let _ = move_entry(&to.join(n), &from.join(n));
-            }
-            return Err(format!("couldn't move {}: {e}", src.display()));
-        }
-        moved.push(name);
-    }
-    let _ = std::fs::remove_dir(from); // only succeeds when nothing else is left
-    Ok(moved.len())
-}
-
-/// Bring settings, saved scans and logs from the pre-0.1.3 locations into the install folder.
-fn migrate_legacy_data(root: &Path) -> Vec<String> {
-    let mut notes = Vec::new();
-    if let Some(old) = crate::paths::legacy_config_dir().filter(|o| !same_path(o, root)) {
-        match move_data(&old, root) {
-            Ok(0) => {}
-            Ok(_) => notes.push(format!(
-                "Moved settings and saved scans from {} to {}",
-                old.display(),
-                root.display()
-            )),
-            Err(e) => notes.push(format!("Old settings were left in {} ({e})", old.display())),
-        }
-    }
-    if let Some(old_logs) = crate::paths::legacy_logs_dir() {
-        let new_logs = root.join("logs");
-        if old_logs.is_dir() && !new_logs.exists() && !same_path(&old_logs, &new_logs) {
-            let _ = move_entry(&old_logs, &new_logs);
-        }
-    }
-    notes
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -263,39 +182,21 @@ pub enum StartupOffer {
     },
 }
 
-pub struct Startup {
-    pub offer: StartupOffer,
-    /// Things worth a log line (e.g. data moved).
-    pub notes: Vec<String>,
-    /// The work was handed to another copy; exit right away.
-    pub exit: bool,
-}
-
-/// Runs before logging starts (so old logs can still be moved). `may_install` is false in the
-/// elevated copy: it never installs, updates or moves anything.
-pub fn on_startup(here: bool, may_install: bool) -> Startup {
-    let mut s = Startup {
-        offer: StartupOffer::None,
-        notes: Vec::new(),
-        exit: false,
-    };
+/// What to offer at start. `may_install` is false in the elevated copy: it never installs,
+/// updates or moves anything.
+pub fn on_startup(here: bool, may_install: bool) -> StartupOffer {
     if !may_install {
-        return s;
+        return StartupOffer::None;
     }
     imp::cleanup_old();
     // A finished (or abandoned) update download.
     let _ = std::fs::remove_dir_all(crate::paths::update_dir());
-    if imp::before_run() {
-        s.exit = true;
-        return s;
-    }
     if let Some(root) = program_root().filter(|r| is_install_root(r)) {
         imp::on_installed_start(&root);
-        s.notes = migrate_legacy_data(&root);
     } else if !cfg!(debug_assertions) && !here && !portable() {
-        s.offer = imp::startup_offer();
+        return imp::startup_offer();
     }
-    s
+    StartupOffer::None
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -363,7 +264,7 @@ pub(crate) mod unix {
 
     /// One line holding the install folder, so a newer download can offer to update it.
     fn pointer_file() -> Option<PathBuf> {
-        crate::paths::legacy_config_dir().map(|d| d.join("install-dir"))
+        crate::paths::pointer_dir().map(|d| d.join("install-dir"))
     }
 
     pub fn pointer_root() -> Option<PathBuf> {
@@ -491,27 +392,18 @@ mod tests {
     }
 
     #[test]
-    fn moves_data_across_folders_and_skips_existing() {
-        let d = std::env::temp_dir().join(format!("ffr-move-{}", std::process::id()));
+    fn delete_data_removes_only_app_entries() {
+        let d = std::env::temp_dir().join(format!("ffr-del-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
-        let (old, new) = (d.join("old"), d.join("new"));
-        std::fs::create_dir_all(old.join("sessions/x")).unwrap();
-        std::fs::write(old.join("settings.toml"), b"v").unwrap();
-        std::fs::write(old.join("unrelated.txt"), b"keep").unwrap();
-        std::fs::create_dir_all(&new).unwrap();
-        std::fs::write(new.join("settings.toml"), b"newer").unwrap();
-        assert_eq!(move_data(&old, &new).unwrap(), 1);
-        assert!(new.join("sessions/x").is_dir());
-        assert_eq!(std::fs::read(new.join("settings.toml")).unwrap(), b"newer");
-        assert!(old.join("unrelated.txt").is_file(), "only app data moves");
-
-        copy_all(&new.join("sessions"), &d.join("copy")).unwrap();
-        assert!(d.join("copy/x").is_dir());
-        move_entry(&d.join("copy"), &d.join("moved")).unwrap();
-        assert!(d.join("moved/x").is_dir() && !d.join("copy").exists());
-
-        delete_data(&new);
-        assert!(!new.join("sessions").exists() && !new.join("settings.toml").exists());
+        std::fs::create_dir_all(d.join("sessions/x")).unwrap();
+        std::fs::write(d.join("settings.toml"), b"v").unwrap();
+        std::fs::write(d.join("unrelated.txt"), b"keep").unwrap();
+        delete_data(&d);
+        assert!(!d.join("sessions").exists() && !d.join("settings.toml").exists());
+        assert!(
+            d.join("unrelated.txt").is_file(),
+            "only app data is deleted"
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 

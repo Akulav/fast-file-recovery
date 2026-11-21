@@ -31,34 +31,9 @@ fn installed_bin(root: &Path) -> PathBuf {
     bundle(root).join("Contents/MacOS").join(BIN_NAME)
 }
 
-/// Versions before 0.1.3 installed the bundle straight into `~/Applications`.
-fn legacy_bundle() -> PathBuf {
-    bundle(&applications())
-}
-
-/// The remembered folder, or the default one when a pre-0.1.3 install exists.
+/// The remembered install folder.
 pub fn remembered_root() -> Option<PathBuf> {
-    pointer_root().or_else(|| legacy_bundle().is_dir().then(default_install_dir))
-}
-
-/// Running from a pre-0.1.3 bundle (after it updated itself): move into the new layout
-/// (`~/Applications/Fast File Recovery/Fast File Recovery.app`) and start from there.
-pub fn before_run() -> bool {
-    let Ok(exe) = std::env::current_exe() else {
-        return false;
-    };
-    let legacy = legacy_bundle();
-    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    if !legacy.is_dir() || !canon(&exe).starts_with(canon(&legacy)) {
-        return false;
-    }
-    match install_and_relaunch(&default_install_dir()) {
-        Ok(()) => true,
-        Err(e) => {
-            tracing::warn!("could not move the app to the new layout: {e}");
-            false
-        }
-    }
+    pointer_root()
 }
 
 pub fn startup_offer() -> StartupOffer {
@@ -105,7 +80,7 @@ fn open(app: &Path) -> Result<(), String> {
 }
 
 /// Build `<root>/Fast File Recovery.app` around a copy of this binary, mark and remember the
-/// folder, remove a pre-0.1.3 bundle, then open the app.
+/// folder, then open the app.
 pub fn install_and_relaunch(root: &Path) -> Result<(), String> {
     std::fs::create_dir_all(root)
         .map_err(|e| format!("Couldn't create {}: {e}", root.display()))?;
@@ -118,10 +93,6 @@ pub fn install_and_relaunch(root: &Path) -> Result<(), String> {
     sign(&app);
     super::write_marker(root).map_err(|e| e.to_string())?;
     remember(root);
-    let legacy = legacy_bundle();
-    if legacy.is_dir() && !same_path(&legacy, &app) {
-        let _ = std::fs::remove_dir_all(&legacy);
-    }
     open(&app)
 }
 
@@ -137,9 +108,6 @@ pub fn uninstall(delete_data: bool) -> Result<String, String> {
     forget();
     if delete_data {
         super::delete_data(&root);
-        if let Some(d) = crate::paths::legacy_config_dir() {
-            let _ = std::fs::remove_dir_all(d);
-        }
         removed.push(format!(
             "settings, saved scans and logs in {}",
             root.display()

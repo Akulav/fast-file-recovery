@@ -3,7 +3,7 @@
 //! hicolor icons. Settings, saved scans and logs live in that same folder.
 
 use super::unix::{copy_self_to, forget, offer_for, pointer_root, remember, swap_in};
-use super::{installed_root, is_install_root, program_root, same_path, StartupOffer};
+use super::{installed_root, StartupOffer};
 use crate::branding::{APP_ID, APP_NAME, BIN_NAME};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -32,7 +32,7 @@ fn data_home() -> PathBuf {
         .unwrap_or_else(|| home().join(".local/share"))
 }
 
-/// Suggested install folder. Versions before 0.1.3 always installed here.
+/// Suggested install folder.
 pub fn default_install_dir() -> PathBuf {
     data_home().join(APP_ID)
 }
@@ -51,27 +51,9 @@ fn desktop_path() -> PathBuf {
         .join(format!("{APP_ID}.desktop"))
 }
 
-/// The remembered folder, or the pre-0.1.3 install (always in the default folder).
+/// The remembered install folder.
 pub fn remembered_root() -> Option<PathBuf> {
-    pointer_root().or_else(|| {
-        let d = default_install_dir();
-        installed_bin(&d).is_file().then_some(d)
-    })
-}
-
-/// A pre-0.1.3 install updated itself in place: adopt its folder as the install folder.
-pub fn before_run() -> bool {
-    let Some(root) = program_root() else {
-        return false;
-    };
-    if !is_install_root(&root) && same_path(&root, &default_install_dir()) {
-        let bin = installed_bin(&root);
-        if bin.is_file() && super::write_marker(&root).is_ok() {
-            remember(&root);
-            let _ = write_desktop_and_icons(&bin);
-        }
-    }
-    false
+    pointer_root()
 }
 
 pub fn startup_offer() -> StartupOffer {
@@ -173,15 +155,6 @@ pub fn uninstall(delete_data: bool) -> Result<String, String> {
     forget();
     if delete_data {
         super::delete_data(&root);
-        for d in [
-            crate::paths::legacy_config_dir(),
-            crate::paths::legacy_logs_dir(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            let _ = std::fs::remove_dir_all(d);
-        }
         removed.push(format!(
             "settings, saved scans and logs in {}",
             root.display()

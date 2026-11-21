@@ -156,21 +156,19 @@ pub fn verify_source(
 ) -> Result<(), String> {
     const CHANGED: &str = "The disk this scan was made from is not connected, or it changed. \
          Connect it and scan again.";
-    if !fingerprint.is_empty() {
-        return if device::fingerprint(dev, src) == fingerprint {
-            Ok(())
-        } else {
-            Err(CHANGED.into())
-        };
+    // A saved scan names both the disk id (used by the destination check) and the path that is
+    // read. They must still belong together, or the check could pass for a different disk.
+    if dev.kind != DeviceKind::ImageFile
+        && !device::list_devices()
+            .iter()
+            .any(|d| d.id == dev.id && d.path == dev.path && d.kind == dev.kind)
+    {
+        return Err(CHANGED.into());
     }
-    // Older saved scans have no fingerprint: match the disk's identity instead.
-    if dev.kind == DeviceKind::ImageFile {
-        return Ok(());
-    }
-    let now = device::list_devices();
-    match now.iter().find(|d| d.id == dev.id) {
-        Some(d) if d.model == dev.model && d.serial == dev.serial && d.size == dev.size => Ok(()),
-        _ => Err(CHANGED.into()),
+    if !fingerprint.is_empty() && device::fingerprint(dev, src) == fingerprint {
+        Ok(())
+    } else {
+        Err(CHANGED.into())
     }
 }
 

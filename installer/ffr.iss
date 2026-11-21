@@ -89,14 +89,19 @@ Type: files; Name: "{app}\{#Marker}"
 Type: filesandordirs; Name: "{app}\update"
 
 [Code]
-function IsUpdate(): Boolean;
+function HasParam(Name: String): Boolean;
 var
   I: Integer;
 begin
   Result := False;
   for I := 1 to ParamCount do
-    if CompareText(ParamStr(I), '/UPDATE') = 0 then
+    if CompareText(ParamStr(I), Name) = 0 then
       Result := True;
+end;
+
+function IsUpdate(): Boolean;
+begin
+  Result := HasParam('/UPDATE');
 end;
 
 procedure InitializeWizard();
@@ -127,20 +132,21 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  AppDir, OldDir: String;
+  AppDir: String;
 begin
   if CurUninstallStep = usPostUninstall then
   begin
     AppDir := ExpandConstant('{app}');
-    { Versions before 0.1.3 kept their data here. }
-    OldDir := ExpandConstant('{userappdata}\FastFileRecovery');
-    { Never delete data when silent. }
-    if (not UninstallSilent) and (HasAppData(AppDir) or DirExists(OldDir)) then
-      if MsgBox(CustomMessage('DeleteData'), mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
-      begin
+    if HasAppData(AppDir) then
+    begin
+      { `fast-file-recovery --uninstall --delete-data` passes /DELETEDATA. Otherwise ask, but
+        never delete data when silent. }
+      if HasParam('/DELETEDATA') then
+        DeleteAppData(AppDir)
+      else if (not UninstallSilent) and
+         (MsgBox(CustomMessage('DeleteData'), mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES) then
         DeleteAppData(AppDir);
-        DelTree(OldDir, True, True, True);
-      end;
+    end;
     RemoveDir(AppDir);
   end;
 end;

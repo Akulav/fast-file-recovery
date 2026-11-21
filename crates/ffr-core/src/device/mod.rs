@@ -421,7 +421,13 @@ pub fn image_device(path: &Path) -> Result<DeviceInfo> {
 pub fn open_source(dev: &DeviceInfo, mode: LockMode) -> Result<SourceHandle> {
     if dev.kind == DeviceKind::ImageFile {
         let file = File::open(&dev.path).map_err(CoreError::from_io)?;
-        let size = file.metadata().map_err(CoreError::from_io)?.len();
+        let meta = file.metadata().map_err(CoreError::from_io)?;
+        // An "image" from a saved scan must really be a file, never a raw disk: the destination
+        // check for images only compares paths.
+        if !meta.is_file() {
+            return Err(CoreError::Invalid("That is not a disk image file.".into()));
+        }
+        let size = meta.len();
         return Ok(SourceHandle {
             file,
             size,

@@ -128,18 +128,10 @@ fn main() -> ExitCode {
     // The elevated copy on Linux/macOS (and anything run as root there) never installs, updates
     // or moves files. Windows always runs as administrator, so that alone doesn't count.
     let may_install = !elevate::is_elevated_instance() && !(cfg!(unix) && elevate::is_elevated());
-    // Before logging starts, so logs from older versions can still be moved into the install folder.
-    let boot = install::on_startup(has("--here"), may_install);
-    if boot.exit {
-        return ExitCode::SUCCESS;
-    }
+    let startup = install::on_startup(has("--here"), may_install);
     let _log = init_logging();
     tracing::info!("{APP_NAME} {VERSION} starting ({})", branding::os_arch());
     tracing::info!("data folder: {}", paths::data_dir().display());
-    for note in &boot.notes {
-        tracing::info!("{note}");
-    }
-    let startup = boot.offer;
     let settings = settings::Settings::load();
 
     let run = |renderer: eframe::Renderer,

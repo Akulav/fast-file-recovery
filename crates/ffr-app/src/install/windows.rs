@@ -11,10 +11,6 @@ pub fn remembered_root() -> Option<PathBuf> {
     None
 }
 
-pub fn before_run() -> bool {
-    false
-}
-
 /// The setup writes the marker; keep its version current.
 pub fn on_installed_start(root: &Path) {
     if super::installed_version(root).as_deref() != Some(VERSION) {

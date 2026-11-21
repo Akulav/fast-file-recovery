@@ -957,13 +957,7 @@ impl FfrApp {
                     ui.max_rect().min + Vec2::splat(gap),
                     ui.max_rect().max - Vec2::new(0.0, gap),
                 );
-                ui.painter().rect(
-                    panel,
-                    CornerRadius::same(theme::CARD_RADIUS + 2),
-                    p.glass(),
-                    Stroke::new(1.0_f32, p.glass_border()),
-                    egui::StrokeKind::Inside,
-                );
+                // Windows 11's navigation pane: flat on the window background, no card around it.
                 ui.scope_builder(egui::UiBuilder::new().max_rect(panel.shrink(12.0)), |ui| {
                     ui.horizontal(|ui| {
                         ui.add(
@@ -1133,11 +1127,11 @@ impl FfrApp {
         let a = ui
             .ctx()
             .animate_bool_with_time(resp.id.with("a"), active, theme::ANIM);
-        // Hyve's nav item: a faint hover, and for the current page an accent gradient with an accent border.
+        // Windows 11's nav item: a faint layer on hover; the current page also gets the accent pill.
         ui.painter().rect_filled(
             rect,
-            CornerRadius::same(theme::CONTROL_RADIUS + 2),
-            Palette::soft(p.text, (h * (1.0 - a) * 14.0) as u8),
+            CornerRadius::same(theme::CONTROL_RADIUS),
+            Palette::soft(p.text, (h * (1.0 - a) * 11.0) as u8),
         );
         if a > 0.0 {
             theme::paint_active_pill(ui.painter(), rect, p, a);

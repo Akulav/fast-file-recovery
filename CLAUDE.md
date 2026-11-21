@@ -31,7 +31,7 @@ This file is the architecture spec and the working rules. The release workflow, 
 | Concern | Choice | Why |
 |---|---|---|
 | GUI | `eframe` / `egui` (wgpu backend, `glow` fallback) + `egui_extras` (virtual tables, images) | Pure Rust, immediate mode, fast to iterate, easy to theme fully |
-| Fonts | Inter (UI) + JetBrains Mono (hex and sizes), embedded with `include_bytes!` (both OFL, licences in `assets/fonts/`) | Clean look that is the same on every OS |
+| Fonts | Segoe UI from Windows on Windows; Inter (UI) elsewhere + JetBrains Mono (hex and sizes), embedded with `include_bytes!` (both OFL, licences in `assets/fonts/`) | Windows 11's own look on Windows, the same clean look elsewhere |
 | Icons in UI | Embedded Lucide SVGs rasterized with `egui_extras` svg feature | Crisp at any DPI |
 | Parallelism | `rayon` (matching), dedicated `std::thread` I/O readers, `crossbeam-channel` | Predictable pipeline and bounded memory |
 | Pattern search | `aho-corasick` (DFA, `MatchKind::Standard`, overlapping) + `memchr` for footers | One pass finds every signature at GB/s |
@@ -245,10 +245,10 @@ Events are batched by the engine to at most 10 per second. The GUI drains the ch
 ### 6.1 Design system (`theme.rs`)
 
 - **Themes:** Dark (default) and Light, plus "Follow system". All colors come from one `Palette` struct, and there are **no raw `Color32` literals outside `theme.rs`**.
-- **Dark palette** (the look of Akulav's Hyve and Lumen): background `#090B14` painted with soft accent / teal / violet glows (`paint_backdrop`), glass panels and cards (`Palette::glass`, translucent white with a hairline `glass_border`), surface `#10131F`, raised `#171B2A`, border `#2A2F45`, text `#E8EAF6`, muted `#8F95B2`, accent `#4F8CFF` (hover `#6A9EFF`), success `#34D399`, warning `#FBBF24`, danger `#F87171`. Category colors: Images `#4F8CFF`, Video `#B47CFF`, Audio `#2BC4A9`, Documents `#F2A93B`, Archives `#E86E5A`, Other `#8A91A0`.
-- **Light palette:** the same hues adjusted for contrast ≥ 4.5:1 on `#F7F8FA`.
-- **Type:** Inter 13 px body, 12 px small, 15 px section titles, 22 px screen titles (semibold). JetBrains Mono for offsets, sizes, hex and throughput.
-- **Shape and space:** 8 px spacing grid, 14 px corner radius on cards, 8 px on controls, 1 px borders, soft shadow on raised cards only. The sidebar is a floating glass panel 14 px from the window edges; the current page's nav item is an accent gradient pill with an accent border (`paint_active_pill`). The window uses the system title bar.
+- **Dark palette** (Windows 11 dark, like Akulav's Hyve): flat background `#202020` (`paint_backdrop`), cards and panels `#2B2B2B` (`Palette::glass` = surface) with a hairline `#3A3A3A` border, raised `#323232`, text `#FFFFFF`, muted `#CFCFCF`, accent `#60CDFF` (hover `#5ABCE9`, black text on it), success `#6CCB5F`, warning `#FCE100`, danger `#FF99A4`. Category colors: Images `#60CDFF`, Video `#B47CFF`, Audio `#2BC4A9`, Documents `#F2A93B`, Archives `#E86E5A`, Other `#8A91A0`. No glows, gradients or translucency.
+- **Light palette:** Windows 11 light (`#F3F3F3` base, `#FBFBFB` cards, accent `#005FB8`), contrast ≥ 4.5:1.
+- **Type:** Segoe UI on Windows (read from the system fonts; it can't be shipped), Inter elsewhere: 13 px body, 12 px small, 15 px section titles, 22 px screen titles (semibold). JetBrains Mono for offsets, sizes, hex and throughput.
+- **Shape and space:** 8 px spacing grid, 8 px corner radius on cards, 4 px on controls, 1 px borders, soft shadow on raised cards only. The sidebar is Windows 11's navigation pane, flat on the window background; the current page's nav item gets a faint layer and a short accent pill on its left edge (`paint_active_pill`). The window uses the system title bar.
 - **Motion:** 150 ms ease-out on hover/selection (`ctx.animate_bool_with_time`), smooth progress values (lerp), no motion while the user scrolls a table.
 - **DPI:** honors OS scale. The layout works from a 960×640 minimum window up to 4K.
 
@@ -294,7 +294,7 @@ Events are batched by the engine to at most 10 per second. The GUI drains the ch
 
 - Not installed ("Just run it", `--portable`, dev builds): data goes next to the program. `FFR_DATA_DIR` overrides.
 - Only outside the folder: shortcuts/menu entries/icons, and on Linux/macOS a one-line pointer to the install folder (`<old config dir>/install-dir`; Windows uses Inno's own registry entry).
-- Data from versions before 0.1.3 (`%APPDATA%\FastFileRecovery`, `~/.config/fast-file-recovery` + `~/.local/state/fast-file-recovery`, `~/Library/Application Support/FastFileRecovery`) is moved into the install folder on the first start of the installed copy, across drives too.
+- Moving data from versions before 0.1.3 into the install folder was removed in 0.3.0 (update to 0.2.1 first). Don't bring it back.
 - The elevated copy on Linux/macOS runs from the same folder and hands files it writes back to `FFR_ORIG_UID`; it never installs, updates or moves data. Updates never touch settings, sessions or logs. Settings have a `version` field and migrate forward.
 
 ---
@@ -309,7 +309,7 @@ Events are batched by the engine to at most 10 per second. The GUI drains the ch
 - **Update mode:** the app runs `FastFileRecovery-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /UPDATE` and exits. A `[Code]` function `IsUpdate()` checks for `/UPDATE`, and the `[Run]` entry `Filename: {app}\fast-file-recovery.exe; Flags: nowait runasoriginaluser; Check: IsUpdate` relaunches the app after a silent update. The interactive install ends with a normal "Launch Fast File Recovery" `postinstall` checkbox.
 - Installing over an existing install upgrades it in place (same AppId). No old-uninstaller dance is needed in v1.
 - **Update mode** passes `/DIR=<current install folder>` so the update always lands in the same folder.
-- **Uninstall:** removes the program and shortcuts, then asks "Also delete settings, saved scans and logs?" (default No) and deletes only the app's own entries in `{app}` (plus the pre-0.1.3 `%APPDATA%\FastFileRecovery`). It never deletes data when silent.
+- **Uninstall:** removes the program and shortcuts, then asks "Also delete settings, saved scans and logs?" (default No) and deletes only the app's own entries in `{app}`. It never deletes data when silent.
 - `.iss` files are **UTF-8 with BOM.**
 
 ### 8.2 Linux: self-installing binary

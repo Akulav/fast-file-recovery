@@ -122,9 +122,8 @@ Give it Full Disk Access in *System Settings → Privacy & Security* to read dis
 
 **In the install folder you chose**, next to the program. Nothing goes to `%APPDATA%`, `~/.config` or other system
 folders. The folder is remembered (Windows: by the setup; Linux/macOS: in `~/.config/fast-file-recovery/install-dir`
-or `~/Library/Application Support/FastFileRecovery/install-dir`), so updates keep everything in place. Settings and
-saved scans from versions before 0.1.3 are moved in on the first start, also when the install folder is on another
-drive.
+or `~/Library/Application Support/FastFileRecovery/install-dir`), so updates keep everything in place. Coming from a
+version before 0.1.3? Update to 0.2.1 first: it moves your old settings and saved scans into the install folder.
 
 | Path | Contents |
 | :-- | :-- |
@@ -266,7 +265,7 @@ installer/        Inno Setup script and wizard images
 
 ## 🙏 Credits
 
-UI icons following [Lucide](https://lucide.dev) (ISC). Inter and JetBrains Mono fonts (SIL OFL 1.1, see `assets/fonts`).
+UI icons following [Lucide](https://lucide.dev) (ISC). Segoe UI on Windows (the system's font); elsewhere Inter, plus JetBrains Mono everywhere (SIL OFL 1.1, see `assets/fonts`).
 
 ---
 
