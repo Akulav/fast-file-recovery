@@ -22,7 +22,7 @@ pub fn preset_name(enabled: &BTreeSet<String>) -> String {
 fn row(ui: &mut Ui, p: &theme::Palette, label: &str, hint: &str, add: impl FnOnce(&mut Ui)) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
-            ui.set_width(260.0);
+            ui.set_width(380.0);
             ui.label(RichText::new(label).color(p.text));
             if !hint.is_empty() {
                 ui.label(widgets::small_muted(p, hint));
@@ -37,10 +37,23 @@ pub fn ui(app: &mut FfrApp, ui: &mut Ui) {
     let p = app.p;
     widgets::top_bar(ui, &p, "Settings", "Saved automatically", |_| {});
     let before = app.settings.clone();
+    widgets::tab_strip(
+        ui,
+        &p,
+        &[
+            (Icon::Settings, "General"),
+            (Icon::Scan, "Scanning"),
+            (Icon::FileText, "File types"),
+            (Icon::Recover, "Recovery"),
+        ],
+        &mut app.settings_tab,
+    );
+    let tab = app.settings_tab;
     let s = &mut app.settings;
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            if tab == 0 {
             widgets::card(&p).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 widgets::section_title(ui, &p, "Appearance");
@@ -55,113 +68,6 @@ pub fn ui(app: &mut FfrApp, ui: &mut Ui) {
                             (ThemePref::System, "Follow system"),
                         ],
                     );
-                });
-            });
-            ui.add_space(theme::SPACE);
-            widgets::card(&p).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                widgets::section_title(ui, &p, "Scanning");
-                row(ui, &p, "Default mode", "", |ui| {
-                    widgets::segmented(
-                        ui,
-                        &p,
-                        &mut s.default_mode,
-                        &[
-                            (ScanMode::Quick, "Quick"),
-                            (ScanMode::Deep, "Deep"),
-                            (ScanMode::Full, "Full"),
-                        ],
-                    );
-                });
-                row(ui, &p, "Chunk size", "Bigger chunks suit fast disks", |ui| {
-                    ui.add(egui::Slider::new(&mut s.chunk_mib, 4..=64).suffix(" MiB"));
-                });
-                row(ui, &p, "Queue depth", "Parallel readers for SSD/NVMe (0 = automatic)", |ui| {
-                    ui.add(egui::Slider::new(&mut s.queue_depth, 0..=16));
-                });
-                row(ui, &p, "Retries on read errors", "Per sector, with a growing delay", |ui| {
-                    ui.add(egui::Slider::new(&mut s.retries, 0..=10));
-                });
-                row(
-                    ui,
-                    &p,
-                    "Only cluster-aligned starts",
-                    "File systems start files on cluster boundaries; this cuts false hits a lot",
-                    |ui| {
-                        widgets::toggle(ui, &p, &mut s.cluster_aligned_only);
-                    },
-                );
-            });
-            ui.add_space(theme::SPACE);
-            widgets::card(&p).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    widgets::section_title(ui, &p, "Formats");
-                    ui.label(widgets::small_muted(&p, format!("{} on", s.enabled_formats.len())));
-                });
-                ui.horizontal(|ui| {
-                    for preset in Preset::ALL {
-                        if widgets::secondary_button(ui, &p, None, preset.label(), true).clicked() {
-                            s.enabled_formats = preset.ids();
-                        }
-                    }
-                    if widgets::secondary_button(ui, &p, None, "None", true).clicked() {
-                        s.enabled_formats.clear();
-                    }
-                });
-                ui.add_space(6.0);
-                ui.columns(3, |cols| {
-                    for (i, c) in Category::ALL.iter().enumerate() {
-                        let ui = &mut cols[i % 3];
-                        ui.horizontal(|ui| {
-                            widgets::icons::icon(ui, Icon::for_category(*c), 15.0, p.category(*c));
-                            ui.label(RichText::new(c.name()).font(theme::semibold(13.0)).color(p.text));
-                        });
-                        for sig in signatures::all().iter().filter(|g| g.category == *c) {
-                            let mut on = s.enabled_formats.contains(sig.id);
-                            let mut label = sig.name.to_string();
-                            if !sig.default_enabled {
-                                label.push_str(" ·");
-                            }
-                            if ui.checkbox(&mut on, label).changed() {
-                                if on {
-                                    s.enabled_formats.insert(sig.id.to_string());
-                                } else {
-                                    s.enabled_formats.remove(sig.id);
-                                }
-                            }
-                        }
-                        ui.add_space(8.0);
-                    }
-                });
-                ui.label(widgets::small_muted(&p, "Formats marked · are off by default because they match a lot of random text."));
-            });
-            ui.add_space(theme::SPACE);
-            widgets::card(&p).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                widgets::section_title(ui, &p, "Recovery");
-                row(ui, &p, "Folder layout", "", |ui| {
-                    egui::ComboBox::from_id_salt("layout")
-                        .selected_text(s.layout.label())
-                        .show_ui(ui, |ui| {
-                            for l in Layout::ALL {
-                                ui.selectable_value(&mut s.layout, l, l.label());
-                            }
-                        });
-                });
-                row(ui, &p, "Files with unreadable sectors", "", |ui| {
-                    egui::ComboBox::from_id_salt("partial")
-                        .selected_text(match s.partial_policy {
-                            PartialPolicy::Suffix => "Add .partial to the name",
-                            PartialPolicy::ZeroFill => "Zero-fill, note in report",
-                        })
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut s.partial_policy, PartialPolicy::Suffix, "Add .partial to the name");
-                            ui.selectable_value(&mut s.partial_policy, PartialPolicy::ZeroFill, "Zero-fill, note in report");
-                        });
-                });
-                row(ui, &p, "Restore original timestamps", "When the file system recorded them", |ui| {
-                    widgets::toggle(ui, &p, &mut s.write_timestamps);
                 });
             });
             ui.add_space(theme::SPACE);
@@ -196,6 +102,128 @@ pub fn ui(app: &mut FfrApp, ui: &mut Ui) {
                     window,
                     ..Settings::default()
                 };
+            }
+            }
+            if tab == 1 {
+            widgets::card(&p).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                widgets::section_title(ui, &p, "Scanning");
+                row(ui, &p, "Default mode", "", |ui| {
+                    widgets::segmented(
+                        ui,
+                        &p,
+                        &mut s.default_mode,
+                        &[
+                            (ScanMode::Quick, "Quick"),
+                            (ScanMode::Deep, "Deep"),
+                            (ScanMode::Full, "Full"),
+                        ],
+                    );
+                });
+                row(ui, &p, "Chunk size", "Bigger chunks suit fast disks", |ui| {
+                    ui.add(egui::Slider::new(&mut s.chunk_mib, 4..=64).suffix(" MiB"));
+                });
+                row(ui, &p, "Queue depth", "Parallel readers for SSD/NVMe (0 = automatic)", |ui| {
+                    ui.add(egui::Slider::new(&mut s.queue_depth, 0..=16));
+                });
+                row(ui, &p, "Retries on read errors", "Per sector, with a growing delay", |ui| {
+                    ui.add(egui::Slider::new(&mut s.retries, 0..=10));
+                });
+                row(
+                    ui,
+                    &p,
+                    "Only cluster-aligned starts",
+                    "File systems start files on cluster boundaries; this cuts false hits a lot",
+                    |ui| {
+                        widgets::toggle(ui, &p, &mut s.cluster_aligned_only);
+                    },
+                );
+            });
+            }
+            if tab == 2 {
+            widgets::card(&p).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    widgets::section_title(ui, &p, "Formats");
+                    ui.label(widgets::small_muted(&p, format!("{} on", s.enabled_formats.len())));
+                });
+                ui.horizontal(|ui| {
+                    for preset in Preset::ALL {
+                        if widgets::secondary_button(ui, &p, None, preset.label(), true).clicked() {
+                            s.enabled_formats = preset.ids();
+                        }
+                    }
+                    if widgets::secondary_button(ui, &p, None, "None", true).clicked() {
+                        s.enabled_formats.clear();
+                    }
+                });
+                ui.add_space(6.0);
+                // Four columns balanced by length, so the whole list fits on one screen.
+                const COLUMNS: [&[Category]; 4] = [
+                    &[Category::Images, Category::Video],
+                    &[Category::Audio, Category::Documents],
+                    &[Category::Archives],
+                    &[Category::Other],
+                ];
+                ui.columns(4, |cols| {
+                    for (col, cats) in COLUMNS.iter().enumerate() {
+                    for c in cats.iter() {
+                        let ui = &mut cols[col];
+                        ui.spacing_mut().interact_size.y = 22.0;
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        ui.horizontal(|ui| {
+                            widgets::icons::icon(ui, Icon::for_category(*c), 15.0, p.category(*c));
+                            ui.label(RichText::new(c.name()).font(theme::semibold(13.0)).color(p.text));
+                        });
+                        for sig in signatures::all().iter().filter(|g| g.category == *c) {
+                            let mut on = s.enabled_formats.contains(sig.id);
+                            let mut label = sig.name.to_string();
+                            if !sig.default_enabled {
+                                label.push_str(" ·");
+                            }
+                            if ui.checkbox(&mut on, label).changed() {
+                                if on {
+                                    s.enabled_formats.insert(sig.id.to_string());
+                                } else {
+                                    s.enabled_formats.remove(sig.id);
+                                }
+                            }
+                        }
+                        ui.add_space(10.0);
+                    }
+                    }
+                });
+                ui.label(widgets::small_muted(&p, "Formats marked · are off by default because they match a lot of random text."));
+            });
+            }
+            if tab == 3 {
+            widgets::card(&p).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                widgets::section_title(ui, &p, "Recovery");
+                row(ui, &p, "Folder layout", "", |ui| {
+                    egui::ComboBox::from_id_salt("layout")
+                        .selected_text(s.layout.label())
+                        .show_ui(ui, |ui| {
+                            for l in Layout::ALL {
+                                ui.selectable_value(&mut s.layout, l, l.label());
+                            }
+                        });
+                });
+                row(ui, &p, "Files with unreadable sectors", "", |ui| {
+                    egui::ComboBox::from_id_salt("partial")
+                        .selected_text(match s.partial_policy {
+                            PartialPolicy::Suffix => "Add .partial to the name",
+                            PartialPolicy::ZeroFill => "Zero-fill, note in report",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut s.partial_policy, PartialPolicy::Suffix, "Add .partial to the name");
+                            ui.selectable_value(&mut s.partial_policy, PartialPolicy::ZeroFill, "Zero-fill, note in report");
+                        });
+                });
+                row(ui, &p, "Restore original timestamps", "When the file system recorded them", |ui| {
+                    widgets::toggle(ui, &p, &mut s.write_timestamps);
+                });
+            });
             }
         });
     if app.settings != before {

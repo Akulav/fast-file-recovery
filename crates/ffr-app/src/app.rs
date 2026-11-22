@@ -348,6 +348,7 @@ pub struct FfrApp {
     pub selected: Option<(DeviceId, Option<u32>)>,
     pub scan_mode: ScanMode,
     pub preset_label: String,
+    pub settings_tab: usize,
     pub lock_disk: bool,
     pub scan: Option<ScanState>,
     pub session: Option<Session>,
@@ -388,6 +389,7 @@ impl FfrApp {
             devices: Devices::default(),
             selected: None,
             preset_label: "Custom".into(),
+            settings_tab: 0,
             lock_disk: true,
             scan: None,
             session: None,
@@ -1558,12 +1560,17 @@ impl eframe::App for FfrApp {
                 bottom: 18,
             }))
             .show(ctx, |ui| match self.screen {
-                Screen::Source => screens::source::ui(self, ui),
-                Screen::Scan => screens::scan::ui(self, ui),
+                Screen::Source => widgets::centered(ui, 1400.0, |ui| screens::source::ui(self, ui)),
+                Screen::Scan => widgets::centered(ui, 1400.0, |ui| screens::scan::ui(self, ui)),
+                // The results table uses all the room it gets.
                 Screen::Results => screens::results::ui(self, ui),
-                Screen::Recover => screens::recover::ui(self, ui),
-                Screen::Settings => screens::settings::ui(self, ui),
-                Screen::About => screens::about::ui(self, ui),
+                Screen::Recover => {
+                    widgets::centered(ui, 1400.0, |ui| screens::recover::ui(self, ui))
+                }
+                Screen::Settings => {
+                    widgets::centered(ui, 1200.0, |ui| screens::settings::ui(self, ui))
+                }
+                Screen::About => widgets::centered(ui, 1000.0, |ui| screens::about::ui(self, ui)),
             });
         self.dialogs(ctx);
         self.toasts.show(ctx, &p);

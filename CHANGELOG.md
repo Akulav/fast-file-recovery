@@ -4,6 +4,14 @@ All notable changes to Fast File Recovery are documented here. The format follow
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-22
+
+### Changed
+- **Centred pages that grow with the window:** Source, Scan, Recover, Settings and About sit in a centred column
+  instead of stretching across a wide window. The results table still uses all the room it gets.
+- **Settings in tabs:** General, Scanning, File types and Recovery. The file type list is laid out in four columns, so
+  every tab fits a maximized window without scrolling.
+
 ## [0.3.0] - 2026-11-21
 
 ### Changed

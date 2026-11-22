@@ -335,6 +335,94 @@ pub fn top_bar(ui: &mut Ui, p: &Palette, title: &str, context: &str, right: impl
     ui.add_space(theme::SPACE * 2.0);
 }
 
+/// Run `add` in a column at most `max_w` wide, centred in the space that is left: pages grow with
+/// the window up to that width and stay centred beyond it.
+pub fn centered(ui: &mut Ui, max_w: f32, add: impl FnOnce(&mut Ui)) {
+    let avail = ui.available_rect_before_wrap();
+    let w = avail.width().min(max_w);
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(avail.center().x - w / 2.0, avail.top()),
+        Vec2::new(w, avail.height()),
+    );
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), add);
+    ui.allocate_rect(avail, Sense::hover());
+}
+
+/// Windows 11 style tab strip: equal tabs in a flat bar, the current one lifted and marked with
+/// the accent. Returns true when the selection changed.
+pub fn tab_strip(ui: &mut Ui, p: &Palette, tabs: &[(Icon, &str)], current: &mut usize) -> bool {
+    let h = 36.0;
+    let (bar, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h + 8.0), Sense::hover());
+    ui.painter().rect(
+        bar,
+        CornerRadius::same(CARD_RADIUS),
+        p.inset(),
+        Stroke::new(1.0_f32, p.border),
+        egui::StrokeKind::Inside,
+    );
+    let inner = bar.shrink(4.0);
+    let n = tabs.len().max(1) as f32;
+    let w = (inner.width() - 4.0 * (n - 1.0)) / n;
+    let mut changed = false;
+    for (i, (icon, label)) in tabs.iter().enumerate() {
+        let r = egui::Rect::from_min_size(
+            egui::pos2(inner.left() + i as f32 * (w + 4.0), inner.top()),
+            Vec2::new(w, h),
+        );
+        let resp = ui.interact(r, ui.id().with(("tab", i)), Sense::click());
+        let on = *current == i;
+        let hover = ui
+            .ctx()
+            .animate_bool_with_time(resp.id, resp.hovered(), theme::ANIM);
+        let fill = if on {
+            p.raised
+        } else {
+            Palette::mix(p.inset(), p.raised, hover * 0.6)
+        };
+        ui.painter()
+            .rect_filled(r, CornerRadius::same(CONTROL_RADIUS), fill);
+        if on {
+            let line = egui::Rect::from_min_max(
+                egui::pos2(r.center().x - 14.0, r.bottom() - 3.0),
+                egui::pos2(r.center().x + 14.0, r.bottom()),
+            );
+            ui.painter()
+                .rect_filled(line, CornerRadius::same(2), p.accent);
+        }
+        let fg = if on {
+            p.text
+        } else {
+            Palette::mix(p.muted, p.text, hover)
+        };
+        let galley = ui
+            .painter()
+            .layout_no_wrap(label.to_string(), theme::semibold(13.5), fg);
+        let total = 16.0 + 8.0 + galley.size().x;
+        let x = r.center().x - total / 2.0;
+        icons::paint(
+            ui,
+            egui::Rect::from_center_size(egui::pos2(x + 8.0, r.center().y), Vec2::splat(16.0)),
+            *icon,
+            fg,
+        );
+        ui.painter().galley(
+            egui::pos2(x + 24.0, r.center().y - galley.size().y / 2.0),
+            galley,
+            fg,
+        );
+        if resp
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+            && !on
+        {
+            *current = i;
+            changed = true;
+        }
+    }
+    ui.add_space(theme::SPACE);
+    changed
+}
+
 /// Smoothly approach a target value (for progress numbers).
 pub fn lerp_towards(current: &mut f32, target: f32, dt: f32) {
     let k = 1.0 - (-dt * 10.0).exp();
